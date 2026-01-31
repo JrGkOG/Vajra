@@ -1,3 +1,21 @@
+# Environment variables
 .env
-.__pycache__
+*.env.local
 
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Test files
+*.pdf
+test_*.txt
+upload_test.py
+upload_pdf.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
