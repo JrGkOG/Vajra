@@ -7,7 +7,10 @@ import os
 from typing import Dict, Any
 from supabase import create_client, Client
 import httpx
+from dotenv import load_dotenv
 
+# Load environment variables from .env file
+load_dotenv()
 
 # Initialize Supabase client
 # These environment variables must be set: SUPABASE_URL, SUPABASE_KEY
