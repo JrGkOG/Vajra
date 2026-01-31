@@ -5,13 +5,14 @@ Implements streaming architecture to prevent loading entire files into RAM.
 
 import uuid
 import base64
-from typing import Optional
-from fastapi import FastAPI, UploadFile, File, Header, HTTPException, status
-from fastapi.responses import JSONResponse
+from typing import Optional, Tuple
+from fastapi import FastAPI, UploadFile, File, Header, HTTPException, status, Query
+from fastapi.responses import JSONResponse, StreamingResponse
 import asyncio
+import json
 
-from crypto_utils import generate_encryption_key, generate_iv, encrypt_chunk
-from storage_service import upload_chunk_to_supabase, save_file_metadata
+from crypto_utils import generate_encryption_key, generate_iv, encrypt_chunk, decrypt_chunk
+from storage_service import upload_chunk_to_supabase, save_file_metadata, get_file_metadata, download_chunk_from_supabase
 
 
 # Constants
@@ -95,6 +96,66 @@ def extract_owner_id_from_token(authorization: Optional[str]) -> str:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid token: {str(e)}"
         )
+
+
+def extract_claims_from_token(authorization: Optional[str]) -> Tuple[str, str]:
+    """
+    Extract user_id AND aal (Authenticator Assurance Level) from JWT token.
+    
+    Args:
+        authorization: Authorization header value (e.g., "Bearer <token>")
+    
+    Returns:
+        Tuple[str, str]: (user_id, aal) where aal is 'aal1' (password only) or 'aal2' (MFA)
+    
+    Raises:
+        HTTPException: If token is missing or invalid
+    """
+    if not authorization:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization header"
+        )
+    
+    parts = authorization.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Authorization header format. Expected: 'Bearer <token>'"
+        )
+    
+    token = parts[1]
+    
+    try:
+        # JWT format: header.payload.signature
+        payload_part = token.split('.')[1]
+        # Add padding if needed for base64 decoding
+        padding = 4 - len(payload_part) % 4
+        if padding != 4:
+            payload_part += '=' * padding
+        
+        payload = json.loads(base64.b64decode(payload_part))
+        
+        # Extract user_id
+        user_id = payload.get('sub') or payload.get('user_id') or payload.get('id')
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token does not contain user identifier"
+            )
+        
+        # Extract aal (Authenticator Assurance Level)
+        # Defaults to 'aal1' if not present (for backward compatibility)
+        aal = payload.get('aal', 'aal1')
+        
+        return str(user_id), str(aal)
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid token: {str(e)}"
+        )
+
 
 
 @app.get("/")
@@ -208,8 +269,8 @@ async def upload_file(
                 "file_id": file_id,
                 "filename": file.filename,
                 "total_chunks": chunk_index,
-                "encryption_key": base64.b64encode(encryption_key).hex(),  # Hex encoded for readability
-                "encryption_iv": base64.b64encode(iv).hex(),
+                "encryption_key": encryption_key.hex(),  # Simple hex encoding
+                "encryption_iv": iv.hex(),  # Simple hex encoding
                 "message": "File uploaded and encrypted successfully. Store the encryption_key securely!"
             }
         )
@@ -223,6 +284,120 @@ async def upload_file(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Upload failed: {str(e)}"
+        )
+
+
+@app.get("/download/{file_id}")
+async def download_file(
+    file_id: str,
+    key: str = Query(..., description="Hex-encoded encryption key"),
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Secure file download endpoint with streaming reassembly and decryption.
+    
+    Security Checks:
+    1. JWT Authentication
+    2. MFA Verification (aal must NOT be 'aal1')
+    3. Ownership Verification (owner_id matches user_id)
+    
+    Process:
+    1. Validate JWT and extract user_id + aal
+    2. Check MFA (reject if aal is 'aal1')
+    3. Fetch file metadata from database
+    4. Verify ownership
+    5. Stream chunks: Download -> Decode -> Decrypt -> Yield
+    
+    Args:
+        file_id: UUID of the file to download
+        key: Hex-encoded encryption key (from upload response)
+        authorization: JWT token in Authorization header
+    
+    Returns:
+        StreamingResponse with decrypted file
+    
+    Raises:
+        HTTPException: If unauthorized, MFA required, or file not found
+    """
+    # Step 1: Extract claims from JWT
+    user_id, aal = extract_claims_from_token(authorization)
+    
+    # Step 2: MFA Check (Critical Security Guardrail)
+    if aal == 'aal1':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="MFA_REQUIRED"
+        )
+    
+    # Step 3: Fetch file metadata
+    try:
+        metadata = await get_file_metadata(file_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File not found: {str(e)}"
+        )
+    
+    # Step 4: Ownership verification
+    if metadata['owner_id'] != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to download this file"
+        )
+    
+    # Step 5: Decode encryption key and IV
+    try:
+        # Key is hex-encoded, convert to bytes
+        encryption_key = bytes.fromhex(key)
+        # IV is stored as base64 in metadata
+        encryption_iv = base64.b64decode(metadata['encryption_iv'])
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid encryption key or IV: {str(e)}"
+        )
+    
+    # Step 6: Create streaming generator
+    async def chunk_generator():
+        """
+        Generator function for streaming reassembly.
+        Downloads, decodes, and decrypts chunks one by one.
+        """
+        total_chunks = metadata['total_chunks']
+        
+        for chunk_index in range(total_chunks):
+            # Download encrypted chunk from Supabase
+            storage_path = f"{file_id}/chunk_{chunk_index}"
+            b64_encrypted_chunk = await download_chunk_from_supabase(
+                bucket=STORAGE_BUCKET,
+                path=storage_path
+            )
+            
+            # Decrypt the chunk
+            decrypted_chunk = decrypt_chunk(
+                b64_encrypted_chunk,
+                encryption_key,
+                encryption_iv
+            )
+            
+            # Yield decrypted chunk
+            yield decrypted_chunk
+    
+    # Step 7: Return streaming response
+    filename = metadata['filename']
+    
+    try:
+        return StreamingResponse(
+            chunk_generator(),
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{filename}\""
+            }
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Download failed: {str(e)}"
         )
 
 

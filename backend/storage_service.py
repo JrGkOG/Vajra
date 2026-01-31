@@ -100,3 +100,65 @@ async def save_file_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
     
     except Exception as e:
         raise Exception(f"Failed to save metadata to database: {str(e)}")
+
+
+async def get_file_metadata(file_id: str) -> Dict[str, Any]:
+    """
+    Retrieve file metadata from Supabase database.
+    
+    Args:
+        file_id: UUID of the file to retrieve metadata for
+    
+    Returns:
+        dict: File metadata containing:
+            - file_id (str)
+            - owner_id (str)
+            - filename (str)
+            - total_chunks (int)
+            - encryption_iv (str)
+            - chunk_hashes (list)
+            - created_at (timestamp)
+    
+    Raises:
+        Exception: If file not found or database query fails
+    """
+    try:
+        response = supabase.table("files_metadata").select("*").eq("file_id", file_id).execute()
+        
+        if not response.data or len(response.data) == 0:
+            raise Exception(f"File not found: {file_id}")
+        
+        return response.data[0]
+    
+    except Exception as e:
+        raise Exception(f"Failed to retrieve file metadata: {str(e)}")
+
+
+async def download_chunk_from_supabase(bucket: str, path: str) -> str:
+    """
+    Download an encrypted chunk from Supabase Storage.
+    
+    Args:
+        bucket: Supabase storage bucket name (e.g., 'uploads')
+        path: Storage path for the chunk (e.g., '{file_id}/chunk_{index}')
+    
+    Returns:
+        str: Base64-encoded encrypted chunk data
+    
+    Raises:
+        Exception: If download fails or chunk not found
+    """
+    try:
+        # Download from Supabase Storage
+        response = supabase.storage.from_(bucket).download(path)
+        
+        if not response:
+            raise Exception(f"Chunk not found at path: {path}")
+        
+        # The response is bytes, decode to string (Base64)
+        chunk_data = response.decode('utf-8')
+        
+        return chunk_data
+    
+    except Exception as e:
+        raise Exception(f"Failed to download chunk from path {path}: {str(e)}")

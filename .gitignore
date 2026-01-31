@@ -8,11 +8,12 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Test files
+# Test files and downloads
 *.pdf
 test_*.txt
 upload_test.py
 upload_pdf.py
+backend/downloads/
 
 # IDE
 .vscode/
