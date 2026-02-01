@@ -17,13 +17,14 @@ FILE_ID = "1cc28085-a4ba-463f-9344-4582f425c95f"  # Replace with actual file_id 
 ENCRYPTION_KEY = "8ce13706bd856e93a1abaface636e1c88a5dd676212800dff6d07ffd028fb8e2"  # Replace with actual key
 ORIGINAL_FILE = "/Users/meenakshiganesan/Karthik/vajra/Proof_of_concept.pdf"  # Path to original file for comparison
 
-def create_mock_jwt(with_mfa=True):
-    """Create a mock JWT token with or without MFA."""
+def create_mock_jwt(with_mfa=True, role="commander"):
+    """Create a mock JWT token with role support."""
     payload = {
         "sub": "test-user-123",
         "user_id": "test-user-123",
         "email": "test@example.com",
-        "aal": "aal2" if with_mfa else "aal1"  # aal2 = MFA enabled, aal1 = password only
+        "aal": "aal2" if with_mfa else "aal1",  # aal2 = MFA enabled
+        "role": role  # commander, specialist, viewer
     }
     
     header = base64.b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).decode()
@@ -60,16 +61,35 @@ else:
     print(f"   Status: {response.status_code}")
     print(f"   Response: {response.text}")
 
-# Test 2: Download with MFA (should succeed)
-print("\n📋 Test 2: Download with MFA (should succeed)")
+# Test 3: Viewer trying to access Top Secret (Should Fail)
+print("\n📋 Test 3: RBAC Check - Viewer vs Top Secret (Should FAIL)")
 print("-" * 60)
-token_with_mfa = create_mock_jwt(with_mfa=True)
+token_viewer = create_mock_jwt(with_mfa=True, role="viewer")
+# Assuming file was uploaded as Top Secret
+response = requests.get(
+    f"{BACKEND_URL}/download/{FILE_ID}",
+    params={"key": ENCRYPTION_KEY},
+    headers={"Authorization": f"Bearer {token_viewer}"}
+)
+
+if response.status_code == 403:
+    print("✅ PASS: Viewer denied access to Top Secret file")
+    print(f"   Response: {response.text}")
+else:
+    print("⚠️  WARN: Viewer verification check (Make sure file is uploaded as top_secret)")
+    print(f"   Status: {response.status_code}")
+
+
+# Test 4: Commander accessing Top Secret (Should Succeed)
+print("\n📋 Test 4: RBAC Check - Commander vs Top Secret (Should SUCCEED)")
+print("-" * 60)
+token_commander = create_mock_jwt(with_mfa=True, role="commander")
 
 try:
     response = requests.get(
         f"{BACKEND_URL}/download/{FILE_ID}",
         params={"key": ENCRYPTION_KEY},
-        headers={"Authorization": f"Bearer {token_with_mfa}"},
+        headers={"Authorization": f"Bearer {token_commander}"},
         stream=True
     )
     
@@ -83,6 +103,7 @@ try:
         
         print(f"✅ Download successful!")
         print(f"   Status: {response.status_code}")
+
         print(f"   Saved to: {download_path}")
         print(f"   Size: {os.path.getsize(download_path):,} bytes")
         
