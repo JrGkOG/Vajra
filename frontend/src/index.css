@@ -1,0 +1,32 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@400;700;900&display=swap');
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+@layer base {
+  body {
+    @apply bg-brutal-bg text-black font-sans;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-mono font-bold uppercase tracking-tight;
+  }
+}
+
+@layer components {
+  .brutal-btn {
+    @apply px-6 py-2 bg-brutal-yellow border-4 border-black font-bold shadow-hard transition-all active:translate-x-1 active:translate-y-1 active:shadow-none hover:bg-yellow-300;
+  }
+
+  .brutal-input {
+    @apply w-full p-3 border-4 border-black shadow-hard-sm focus:outline-none focus:shadow-hard transition-all;
+  }
+
+  .brutal-card {
+    @apply p-8 bg-white border-4 border-black shadow-hard;
+  }
+}
