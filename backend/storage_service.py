@@ -192,3 +192,18 @@ async def log_audit_event(event: Dict[str, Any]) -> Dict[str, Any]:
         # We will just print/log the error here to avoid breaking user flow.
         print(f"⚠️ AUDIT LOGGING FAILED: {str(e)}")
         return {"success": False, "error": str(e)}
+
+
+async def list_files() -> list:
+    """
+    List all files from the files_metadata table.
+    
+    Returns:
+        list: List of file metadata dictionaries
+    """
+    try:
+        response = supabase.table("files_metadata").select("*").execute()
+        return response.data if response.data else []
+    except Exception as e:
+        print(f"❌ Failed to list files: {str(e)}")
+        raise e
