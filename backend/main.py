@@ -9,11 +9,13 @@ from typing import Optional, Tuple, Dict, Any
 from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, Header, HTTPException, status, Query
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import asyncio
 import json
 
 from crypto_utils import generate_encryption_key, generate_iv, encrypt_chunk, decrypt_chunk
-from storage_service import upload_chunk_to_supabase, save_file_metadata, get_file_metadata, download_chunk_from_supabase, log_audit_event
+from storage_service import upload_chunk_to_supabase, save_file_metadata, get_file_metadata, download_chunk_from_supabase, log_audit_event, list_files
 
 
 # Constants
@@ -26,6 +28,20 @@ app = FastAPI(
     description="Streaming file upload with AES-256-GCM encryption and sharding",
     version="1.0.0"
 )
+
+# Add CORS middleware for frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # Vite dev server
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Pydantic models
+class LoginRequest(BaseModel):
+    username: str
+    password: str
 
 
 def extract_owner_id_from_token(authorization: Optional[str]) -> str:
@@ -163,6 +179,71 @@ def extract_claims_from_token(authorization: Optional[str]) -> Tuple[str, str]:
 async def root():
     """Health check endpoint."""
     return {"status": "ok", "message": "Secure Upload API is running"}
+
+
+@app.post("/login")
+async def login(request: LoginRequest):
+    """
+    Mock login endpoint that issues JWT tokens.
+    
+    For PoC: Accepts any password, assigns role based on username.
+    - 'commander' -> role: commander, status: active
+    - 'viewer' -> role: viewer, status: active
+    - Any other -> role: viewer, status: active
+    """
+    username = request.username.lower()
+    
+    # Mock role assignment
+    if username == "commander":
+        role = "commander"
+    elif username == "specialist":
+        role = "specialist"
+    else:
+        role = "viewer"
+    
+    # Create mock JWT payload
+    payload = {
+        "sub": username,
+        "user_id": username,
+        "email": f"{username}@vajra.mil",
+        "aal": "aal2",  # Assume MFA completed
+        "role": role,
+        "status": "active"
+    }
+    
+    # Create mock JWT (header.payload.signature)
+    header = base64.b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).decode()
+    payload_encoded = base64.b64encode(json.dumps(payload).encode()).decode()
+    mock_token = f"{header}.{payload_encoded}.mock-signature"
+    
+    return {
+        "access_token": mock_token,
+        "token_type": "bearer",
+        "user": {
+            "username": username,
+            "role": role,
+            "status": "active"
+        }
+    }
+
+
+@app.get("/files")
+async def get_files(authorization: Optional[str] = Header(None)):
+    """
+    List all files in the system.
+    Requires authentication.
+    """
+    # Verify user is authenticated
+    user_id = extract_owner_id_from_token(authorization)
+    
+    try:
+        files = await list_files()
+        return {"success": True, "files": files}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list files: {str(e)}"
+        )
 
 
 @app.post("/upload")
