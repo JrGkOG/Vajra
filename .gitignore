@@ -20,3 +20,4 @@ backend/downloads/
 .idea/
 *.swp
 *.swo
+commit.sh

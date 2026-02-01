@@ -1,119 +1,85 @@
 #!/bin/bash
-# Comprehensive commit script for Secure Upload & Download Backend
 
-set -e  # Exit on error
+# Backend changes
+git add backend/main.py
+git commit -m "Add auth and file listing endpoints"
 
-echo "🚀 Starting Git Commit Process..."
-echo ""
+git add backend/storage_service.py
+git commit -m "Add file listing service function"
 
-# Stage all files
-echo "📁 Staging all backend files..."
-git add .gitignore
-git add README.md
-git add commit.sh
-git add backend/
+# Frontend config files
+git add frontend/.gitignore
+git commit -m "Add frontend gitignore"
 
-echo ""
-echo "📝 Creating structured commits..."
-echo ""
+git add frontend/package.json
+git commit -m "Add frontend dependencies"
 
-# Commit 1: Project infrastructure
-git commit -m "chore: Setup project infrastructure and dependencies
+git add frontend/package-lock.json
+git commit -m "Lock frontend dependency versions"
 
-- Configure .gitignore for Python, cache, downloads, and test files
-- Add requirements.txt with FastAPI, Supabase, cryptography
-- Create backend/downloads directory for CLI testing
-- Add comprehensive README with setup instructions" 2>/dev/null || echo "  ℹ️  (already committed or no changes)"
+git add frontend/vite.config.js
+git commit -m "Add Vite build configuration"
 
-echo "✅ Commit 1: Infrastructure"
+git add frontend/tailwind.config.js
+git commit -m "Add Tailwind CSS configuration"
 
-# Commit 2: Crypto utilities
-git commit -m "feat: Implement AES-256-GCM encryption system
+git add frontend/postcss.config.js
+git commit -m "Add PostCSS configuration"
 
-- Add encrypt_chunk() with AES-256-GCM encryption
-- Add decrypt_chunk() for download reassembly
-- Implement SHA-256 integrity hashing
-- Generate secure 256-bit keys and 96-bit IVs
-- Base64 encoding for safe storage" backend/crypto_utils.py 2>/dev/null || echo "  ℹ️  (already committed)"
+git add frontend/eslint.config.js
+git commit -m "Add ESLint configuration"
 
-echo "✅ Commit 2: Crypto utilities"
+git add frontend/index.html
+git commit -m "Add frontend entry HTML"
 
-# Commit 3: Supabase storage service
-git commit -m "feat: Add Supabase storage and database integration
+git add frontend/README.md
+git commit -m "Add frontend documentation"
 
-- Implement async upload_chunk_to_supabase()
-- Add save_file_metadata() for DB persistence
-- Implement get_file_metadata() for download queries
-- Add download_chunk_from_supabase() for retrieval
-- Support environment variable configuration" backend/storage_service.py backend/.env.example 2>/dev/null || echo "  ℹ️  (already committed)"
+# Frontend public assets
+git add frontend/public/
+git commit -m "Add public assets"
 
-echo "✅ Commit 3: Storage service"
+# Frontend source - Core
+git add frontend/src/main.jsx
+git commit -m "Add React entry point"
 
-# Commit 4: Upload endpoint
-git commit -m "feat: Implement secure streaming upload endpoint
+git add frontend/src/App.jsx
+git commit -m "Add app routing logic"
 
-- Add POST /upload with JWT authentication
-- Stream files in 512KB chunks (memory-safe)
-- Encrypt each chunk with unique session key
-- Concurrent async uploads to Supabase
-- Extract owner_id from JWT Bearer token
-- Return encryption key and file_id to client
+git add frontend/src/App.css
+git commit -m "Add app styles"
 
-BREAKING CHANGE: Fixed key encoding from base64+hex to simple hex" backend/main.py 2>/dev/null || echo "  ℹ️  (already committed)"
+git add frontend/src/index.css
+git commit -m "Add global styles and Tailwind imports"
 
-echo "✅ Commit 4: Upload endpoint"
+# Frontend source - Services
+git add frontend/src/services/api.js
+git commit -m "Add API service layer"
 
-# Commit 5: Download endpoint with MFA
-git commit -m "feat: Implement secure download endpoint with MFA verification
+# Frontend source - UI Components
+git add frontend/src/components/ui/Button.jsx
+git commit -m "Add Button component"
 
-- Add GET /download/{file_id} with streaming response
-- Enforce MFA check: reject aal1 (password-only)
-- Verify file ownership before download
-- Stream chunk reassembly: Download → Decode → Decrypt → Yield
-- Set Content-Disposition for browser downloads
-- Add extract_claims_from_token() for aal verification
+git add frontend/src/components/ui/Card.jsx
+git commit -m "Add Card component"
 
-Security:
-- MFA required (aal2) for all downloads
-- Owner-only access control
-- Memory-safe streaming architecture" backend/main.py 2>/dev/null || echo "  ℹ️  (already committed)"
+git add frontend/src/components/ui/Input.jsx
+git commit -m "Add Input component"
 
-echo "✅ Commit 5: Download endpoint"
+# Frontend source - Features
+git add frontend/src/features/welcome/Welcome.jsx
+git commit -m "Add Welcome landing page"
 
-# Commit 6: Test scripts
-git commit -m "test: Add comprehensive upload and download test suites
+git add frontend/src/features/auth/Login.jsx
+git commit -m "Add Login page with API integration"
 
-Upload Tests:
-- upload_test.py: Offline encryption/chunking verification
-- upload_pdf.py: End-to-end upload with real file
+git add frontend/src/features/files/Dashboard.jsx
+git commit -m "Add Dashboard layout"
 
-Download Tests:
-- download_test.py: HTTP streaming download + MFA verification
-- test_manual_download.py: Direct chunk reassembly validation
-- SHA-256 hash comparison for integrity verification
+git add frontend/src/features/files/Upload.jsx
+git commit -m "Add file upload component"
 
-All tests save to backend/downloads/ for easy access" backend/upload_test.py backend/upload_pdf.py backend/download_test.py backend/test_manual_download.py backend/downloads/.gitkeep 2>/dev/null || echo "  ℹ️  (already committed)"
+git add frontend/src/features/files/FileList.jsx
+git commit -m "Add file list component"
 
-echo "✅ Commit 6: Test scripts"
-
-# Commit 7: Documentation
-git commit -m "docs: Add setup guides and API documentation
-
-- Update README with quickstart
-- Document environment variables
-- Add API endpoint usage examples
-- Include curl commands for testing" README.md backend/README.md backend/SUPABASE_SETUP.md 2>/dev/null || echo "  ℹ️  (already committed)"
-
-echo "✅ Commit 7: Documentation"
-
-echo ""
-echo "🎉 All commits created successfully!"
-echo ""
-echo "📊 Current Git Status:"
-git status --short
-echo ""
-echo "📝 Recent commits:"
-git log --oneline -10
-echo ""
-echo "💡 Next steps:"
-echo "   git push origin main"
+echo "✅ All files committed successfully!"
