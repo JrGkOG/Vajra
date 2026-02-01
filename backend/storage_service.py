@@ -162,3 +162,33 @@ async def download_chunk_from_supabase(bucket: str, path: str) -> str:
     
     except Exception as e:
         raise Exception(f"Failed to download chunk from path {path}: {str(e)}")
+
+
+async def log_audit_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Log a security event to the audit_logs table.
+    
+    Args:
+        event: Dictionary containing:
+            - timestamp (str, ISO format)
+            - user_id (str)
+            - action (str): UPLOAD, DOWNLOAD, ACCESS_DENIED
+            - resource_id (str): file_id
+            - details (dict): Additional context (IP, reason, attributes)
+            
+    Returns:
+        dict: Inserted record
+        
+    Note: Ensure 'audit_logs' table exists in Supabase.
+    """
+    try:
+        # In a real app, you might want to fire-and-forget this or use a queue
+        # so it doesn't block the main request. For PoC, we await it.
+        response = supabase.table("audit_logs").insert(event).execute()
+        return {"success": True, "data": response.data}
+    except Exception as e:
+        # Fail open or closed? For logging, usually fail open (log error but don't stop user)
+        # But for high security, maybe fail closed.
+        # We will just print/log the error here to avoid breaking user flow.
+        print(f"⚠️ AUDIT LOGGING FAILED: {str(e)}")
+        return {"success": False, "error": str(e)}
