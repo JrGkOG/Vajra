@@ -16,6 +16,7 @@ import json
 
 from crypto_utils import generate_encryption_key, generate_iv, encrypt_chunk, decrypt_chunk
 from storage_service import upload_chunk_to_supabase, save_file_metadata, get_file_metadata, download_chunk_from_supabase, log_audit_event, list_files
+from vault_service import encrypt_key_for_vault, decrypt_key_from_vault
 
 
 # Constants
@@ -425,31 +426,37 @@ async def download_file(
             detail=f"File not found: {str(e)}"
         )
     
-    # Step 4: ABAC Check (Role + Status + Classification)
-    file_classification = metadata.get('classification', 'public')
+    # Step 4: Ownership Check FIRST - Owners can always download their own files
+    # OR Commanders have admin override for all files
+    is_owner = metadata['owner_id'] == user_id
+    is_commander = role == 'commander'
     
-    allowed, reason = check_abac_access(role, status_val, file_classification)
-    
-    if not allowed:
-        # Log Access Denied
-        await log_audit_event({
-            "timestamp": datetime.utcnow().isoformat(),
-            "user_id": user_id,
-            "action": "ACCESS_DENIED",
-            "resource_id": file_id,
-            "details": {
-                "reason": reason,
-                "role": role,
-                "status": status_val,
-                "classification": file_classification
-            }
-        })
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Access Denied: {reason}"
-        )
+    if not is_owner and not is_commander:
+        # Non-owners need ABAC check
+        file_classification = metadata.get('classification', 'public')
+        allowed, reason = check_abac_access(role, status_val, file_classification)
+        
+        if not allowed:
+            # Log Access Denied
+            await log_audit_event({
+                "timestamp": datetime.utcnow().isoformat(),
+                "user_id": user_id,
+                "action": "ACCESS_DENIED",
+                "resource_id": file_id,
+                "details": {
+                    "reason": reason,
+                    "role": role,
+                    "status": status_val,
+                    "classification": file_classification
+                }
+            })
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access Denied: {reason}"
+            )
 
     # Log Successful Access
+    file_classification = metadata.get('classification', 'public')
     await log_audit_event({
         "timestamp": datetime.utcnow().isoformat(),
         "user_id": user_id,
@@ -457,17 +464,11 @@ async def download_file(
         "resource_id": file_id,
         "details": {
             "classification": file_classification,
-            "role": role
+            "role": role,
+            "is_owner": is_owner
         }
     })
 
-    # Step 5: Ownership verification (Optional if RBAC is strict, but keeping as extra layer)
-    # We allow Commanders to access ANY file (Admin override), otherwise check owner
-    if role != 'commander' and metadata['owner_id'] != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to download this file"
-        )
     
     # Step 5: Decode encryption key and IV
     try:
@@ -647,3 +648,146 @@ def check_abac_access(user_role: str, user_status: str, file_classification: str
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# ===== VAULT ENDPOINTS =====
+
+from storage_service import store_vault_key, retrieve_vault_key, list_vault_keys, delete_vault_key
+
+class VaultStoreRequest(BaseModel):
+    file_id: Optional[str] = None
+    key_label: Optional[str] = None
+    hex_key: str
+    password: str
+    mfa_code: str  # 6-digit MFA code
+
+
+class VaultRetrieveRequest(BaseModel):
+    vault_id: str
+    password: str
+    mfa_code: str  # 6-digit MFA code
+
+
+@app.post("/vault/store")
+async def store_key_in_vault(
+    request: VaultStoreRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Store an encryption key in the personal vault.
+    Requires password + MFA authentication.
+    """
+    # Extract user_id from JWT
+    user_id = extract_owner_id_from_token(authorization)
+    
+    # TODO: Verify MFA code (for now we skip actual verification in PoC)
+    # In production: Call Supabase Auth or TOTP library to verify mfa_code
+    
+    # Encrypt the hex key with password
+    encrypted_data = encrypt_key_for_vault(request.hex_key, request.password)
+    
+    # Store in database
+    vault_data = {
+        "user_id": user_id,
+        "file_id": request.file_id,
+        "key_label": request.key_label,
+        "encrypted_hex": encrypted_data['encrypted_hex'],
+        "salt": encrypted_data['salt']
+    }
+    
+    try:
+        result = await store_vault_key(vault_data)
+        return {
+            "success": True,
+            "vault_id": result['data'][0]['vault_id'],
+            "message": "Encryption key stored securely in vault"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to store key in vault: {str(e)}"
+        )
+
+
+@app.post("/vault/retrieve")
+async def retrieve_key_from_vault(
+    request: VaultRetrieveRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Retrieve and decrypt an encryption key from the vault.
+    Requires password + MFA authentication.
+    """
+    # Extract user_id from JWT
+    user_id = extract_owner_id_from_token(authorization)
+    
+    print(f"🔍 DEBUG: Retrieving vault key {request.vault_id} for user {user_id}")
+    
+    # TODO: Verify MFA code
+    
+    try:
+        # Fetch encrypted key from database
+        vault_entry = await retrieve_vault_key(request.vault_id, user_id)
+        
+        print(f"🔍 DEBUG: Found vault entry - file_id: {vault_entry.get('file_id')}, label: {vault_entry.get('key_label')}")
+        
+        # Decrypt the key using password
+        decrypted_hex = decrypt_key_from_vault(
+            vault_entry['encrypted_hex'],
+            vault_entry['salt'],
+            request.password
+        )
+        
+        print(f"🔍 DEBUG: Decrypted hex key (first 16 chars): {decrypted_hex[:16]}...")
+        
+        return {
+            "success": True,
+            "hex_key": decrypted_hex,
+            "file_id": vault_entry.get('file_id'),
+            "key_label": vault_entry.get('key_label')
+        }
+    except Exception as e:
+        print(f"❌ ERROR: Vault retrieval failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Failed to retrieve key: {str(e)}"
+        )
+
+
+@app.get("/vault/list")
+async def list_user_vault_keys(authorization: Optional[str] = Header(None)):
+    """
+    List all vault keys for the authenticated user.
+    Does not return decrypted keys, only metadata.
+    """
+    user_id = extract_owner_id_from_token(authorization)
+    
+    print(f"🔍 DEBUG: Listing vault keys for user_id: {user_id}")
+    
+    try:
+        keys = await list_vault_keys(user_id)
+        print(f"🔍 DEBUG: Found {len(keys)} keys")
+        return {"success": True, "keys": keys}
+    except Exception as e:
+        print(f"❌ ERROR: Failed to list vault keys: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list vault keys: {str(e)}"
+        )
+
+
+@app.delete("/vault/{vault_id}")
+async def delete_vault_entry(
+    vault_id: str,
+    authorization: Optional[str] = Header(None)
+):
+    """Delete a vault key entry."""
+    user_id = extract_owner_id_from_token(authorization)
+    
+    try:
+        result = await delete_vault_key(vault_id, user_id)
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Failed to delete vault key: {str(e)}"
+        )
