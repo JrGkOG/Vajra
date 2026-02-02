@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UploadCloud } from 'lucide-react';
-import { uploadFile } from '../../services/api';
+import { uploadFile, storeKeyInVault } from '../../services/api';
 import { Button } from '../../components/ui/Button';
 
 export const Upload = ({ token }) => {
@@ -10,6 +10,11 @@ export const Upload = ({ token }) => {
     const [uploading, setUploading] = useState(false);
     const [uploadResult, setUploadResult] = useState(null);
     const [error, setError] = useState('');
+
+    // Vault options
+    const [saveToVault, setSaveToVault] = useState(true); // Default to true
+    const [vaultPassword, setVaultPassword] = useState('');
+    const [keyLabel, setKeyLabel] = useState('');
 
     const handleDrag = (e) => {
         e.preventDefault();
@@ -39,14 +44,42 @@ export const Upload = ({ token }) => {
     const handleUpload = async () => {
         if (!file || !token) return;
 
+        // Validate vault inputs if saving to vault
+        if (saveToVault && (!keyLabel || !vaultPassword)) {
+            setError('Please enter key label and vault password to save key securely');
+            return;
+        }
+
         setUploading(true);
         setError('');
         setUploadResult(null);
 
         try {
+            // Step 1: Upload file
             const result = await uploadFile(file, classification, token);
+
+            // Step 2: Save key to vault if option is checked
+            if (saveToVault) {
+                try {
+                    await storeKeyInVault(
+                        result.encryption_key,
+                        vaultPassword,
+                        '000000', // Dummy MFA for upload (not verified)
+                        result.file_id,
+                        keyLabel,
+                        token
+                    );
+                    result.savedToVault = true;
+                } catch (vaultError) {
+                    // If vault storage fails, still show the key to user
+                    result.vaultError = vaultError.message;
+                }
+            }
+
             setUploadResult(result);
             setFile(null); // Reset file after successful upload
+            setVaultPassword('');
+            setKeyLabel('');
         } catch (err) {
             setError(err.message || 'Upload failed');
         } finally {
@@ -71,6 +104,55 @@ export const Upload = ({ token }) => {
                     <option value="top_secret">🔴 TOP SECRET</option>
                 </select>
             </div>
+
+            {/* Save to Vault Option */}
+            <div className="mb-4 p-4 bg-brutal-yellow border-4 border-black">
+                <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={saveToVault}
+                        onChange={(e) => {
+                            setSaveToVault(e.target.checked);
+                            setShowVaultInputs(e.target.checked);
+                        }}
+                        className="w-6 h-6 border-4 border-black"
+                    />
+                    <span className="font-mono font-bold">🔐 SAVE ENCRYPTION KEY TO VAULT</span>
+                </label>
+                <p className="text-xs font-mono mt-2 ml-9">
+                    Store key securely with password protection. No manual saving required!
+                </p>
+            </div>
+
+            {/* Vault Inputs */}
+            {saveToVault && (
+                <div className="mb-4 p-4 bg-white border-4 border-black space-y-3">
+                    <div>
+                        <label className="block font-mono font-bold text-sm mb-1">KEY LABEL *</label>
+                        <input
+                            type="text"
+                            value={keyLabel}
+                            onChange={(e) => setKeyLabel(e.target.value)}
+                            placeholder="e.g., Telemetry Report Jan 2026"
+                            className="w-full p-2 border-2 border-black font-mono text-sm"
+                            required={saveToVault}
+                        />
+                        <p className="text-xs text-gray-600 mt-1 font-mono">Give this key a memorable name</p>
+                    </div>
+                    <div>
+                        <label className="block font-mono font-bold text-sm mb-1">VAULT PASSWORD *</label>
+                        <input
+                            type="password"
+                            value={vaultPassword}
+                            onChange={(e) => setVaultPassword(e.target.value)}
+                            placeholder="Enter vault password"
+                            className="w-full p-2 border-2 border-black font-mono text-sm"
+                            required={saveToVault}
+                        />
+                        <p className="text-xs text-gray-600 mt-1 font-mono">MFA required only when retrieving</p>
+                    </div>
+                </div>
+            )}
 
             <div
                 className={`
@@ -123,10 +205,26 @@ export const Upload = ({ token }) => {
                     <p className="font-bold">✅ UPLOAD SUCCESS</p>
                     <p className="text-xs mt-2">File ID: {uploadResult.file_id}</p>
                     <p className="text-xs">Chunks: {uploadResult.total_chunks}</p>
-                    <div className="mt-3 p-2 bg-yellow-50 border-2 border-yellow-600">
-                        <p className="font-bold text-xs mb-1">🔑 ENCRYPTION KEY (SAVE THIS!):</p>
-                        <p className="break-all text-xs">{uploadResult.encryption_key}</p>
-                    </div>
+
+                    {uploadResult.savedToVault ? (
+                        <div className="mt-3 p-2 bg-brutal-blue text-white border-2 border-black">
+                            <p className="font-bold text-xs">🔐 KEY SAVED TO VAULT SECURELY!</p>
+                            <p className="text-xs mt-1">You can retrieve it anytime with your vault password + MFA</p>
+                        </div>
+                    ) : uploadResult.vaultError ? (
+                        <>
+                            <div className="mt-3 p-2 bg-yellow-50 border-2 border-yellow-600">
+                                <p className="font-bold text-xs mb-1">⚠️ Vault save failed: {uploadResult.vaultError}</p>
+                                <p className="font-bold text-xs mb-1">🔑 ENCRYPTION KEY (SAVE THIS!):</p>
+                                <p className="break-all text-xs">{uploadResult.encryption_key}</p>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="mt-3 p-2 bg-yellow-50 border-2 border-yellow-600">
+                            <p className="font-bold text-xs mb-1">🔑 ENCRYPTION KEY (SAVE THIS!):</p>
+                            <p className="break-all text-xs">{uploadResult.encryption_key}</p>
+                        </div>
+                    )}
                 </div>
             )}
         </div>
