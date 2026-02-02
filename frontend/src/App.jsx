@@ -1,38 +1,54 @@
 import React, { useState } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Welcome } from './features/welcome/Welcome';
 import { Login } from './features/auth/Login';
 import { Dashboard } from './features/files/Dashboard';
 
 function App() {
-  const [view, setView] = useState('welcome'); // 'welcome' | 'login' | 'dashboard'
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
-
-  const handleEnterSystem = () => {
-    setView('login');
-  };
 
   const handleLogin = (userData) => {
     setUser(userData.user);
     setToken(userData.token);
-    setView('dashboard');
   };
 
   const handleLogout = () => {
     setUser(null);
     setToken(null);
-    setView('welcome');
   };
 
-  if (view === 'welcome') {
-    return <Welcome onEnter={handleEnterSystem} />;
-  }
+  return (
+    <Router>
+      <Routes>
+        {/* Home/Welcome Page */}
+        <Route path="/" element={<Welcome />} />
 
-  if (view === 'login') {
-    return <Login onLogin={handleLogin} />;
-  }
+        {/* Login Route */}
+        <Route
+          path="/login"
+          element={
+            user ?
+              <Navigate to="/dashboard" replace /> :
+              <Login onLogin={handleLogin} />
+          }
+        />
 
-  return <Dashboard user={user} token={token} onLogout={handleLogout} />;
+        {/* Dashboard Route - Protected */}
+        <Route
+          path="/dashboard"
+          element={
+            user ?
+              <Dashboard user={user} token={token} onLogout={handleLogout} /> :
+              <Navigate to="/login" replace />
+          }
+        />
+
+        {/* Catch all - redirect to home */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Router>
+  );
 }
 
 export default App;
