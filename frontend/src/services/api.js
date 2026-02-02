@@ -97,3 +97,108 @@ export async function downloadFile(fileId, encryptionKey, token) {
 
     return await response.blob();
 }
+
+// ===== VAULT API FUNCTIONS =====
+
+/**
+ * Store encryption key in vault
+ * @param {string} hexKey - Encryption key in hex format
+ * @param {string} password - Vault password
+ * @param {string} mfaCode - 6-digit MFA code
+ * @param {string} fileId - Optional file ID
+ * @param {string} keyLabel - Optional label for the key
+ * @param {string} token - JWT token
+ */
+export async function storeKeyInVault(hexKey, password, mfaCode, fileId, keyLabel, token) {
+    const response = await fetch(`${API_BASE_URL}/vault/store`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+            hex_key: hexKey,
+            password,
+            mfa_code: mfaCode,
+            file_id: fileId,
+            key_label: keyLabel
+        })
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail ||'Failed to store key in vault');
+    }
+
+    return await response.json();
+}
+
+/**
+ * Retrieve encryption key from vault
+ * @param {string} vaultId - Vault entry ID
+ * @param {string} password - Vault password
+ * @param {string} mfaCode - 6-digit MFA code
+ * @param {string} token - JWT token
+ */
+export async function retrieveKeyFromVault(vaultId, password, mfaCode, token) {
+    const response = await fetch(`${API_BASE_URL}/vault/retrieve`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+            vault_id: vaultId,
+            password,
+            mfa_code: mfaCode
+        })
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to retrieve key from vault');
+    }
+
+    return await response.json();
+}
+
+/**
+ * List all vault keys for user
+ * @param {string} token - JWT token
+ */
+export async function listVaultKeys(token) {
+    const response = await fetch(`${API_BASE_URL}/vault/list`, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${token}`
+        }
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to list vault keys');
+    }
+
+    return await response.json();
+}
+
+/**
+ * Delete a vault key
+ * @param {string} vaultId - Vault entry ID
+ * @param {string} token - JWT token
+ */
+export async function deleteVaultKey(vaultId, token) {
+    const response = await fetch(`${API_BASE_URL}/vault/${vaultId}`, {
+        method: 'DELETE',
+        headers: {
+            'Authorization': `Bearer ${token}`
+        }
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to delete vault key');
+    }
+
+    return await response.json();
+}
