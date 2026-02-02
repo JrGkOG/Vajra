@@ -207,3 +207,53 @@ async def list_files() -> list:
     except Exception as e:
         print(f"❌ Failed to list files: {str(e)}")
         raise e
+
+# Vault Operations
+
+async def store_vault_key(vault_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Store an encrypted key in the user_vaults table."""
+    try:
+        response = supabase.table("user_vaults").insert(vault_data).execute()
+        return {"success": True, "data": response.data}
+    except Exception as e:
+        raise Exception(f"Failed to store vault key: {str(e)}")
+
+
+async def retrieve_vault_key(vault_id: str, user_id: str) -> Dict[str, Any]:
+    """Retrieve an encrypted key from user_vaults table."""
+    try:
+        response = supabase.table("user_vaults").select("*").eq("vault_id", vault_id).eq("user_id", user_id).execute()
+        
+        if not response.data or len(response.data) == 0:
+            raise Exception(f"Vault key not found or access denied")
+        
+        return response.data[0]
+    except Exception as e:
+        raise Exception(f"Failed to retrieve vault key: {str(e)}")
+
+
+async def list_vault_keys(user_id: str) -> list:
+    """List all vault keys for a user (without decrypted values)."""
+    try:
+        response = supabase.table("user_vaults").select("vault_id, file_id, key_label, created_at").eq("user_id", user_id).execute()
+        return response.data if response.data else []
+    except Exception as e:
+        print(f"❌ Failed to list vault keys: {str(e)}")
+        raise e
+
+
+async def delete_vault_key(vault_id: str, user_id: str) -> Dict[str, Any]:
+    """Delete a vault key entry."""
+    try:
+        # First verify ownership
+        response = supabase.table("user_vaults").select("user_id").eq("vault_id", vault_id).execute()
+        
+        if not response.data or response.data[0]['user_id'] !=user_id:
+            raise Exception("Vault key not found or access denied")
+        
+        # Delete the entry
+        supabase.table("user_vaults").delete().eq("vault_id", vault_id).execute()
+        
+        return {"success": True, "message": "Vault key deleted"}
+    except Exception as e:
+        raise Exception(f"Failed to delete vault key: {str(e)}")
