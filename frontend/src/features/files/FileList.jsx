@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Download, Lock, RefreshCw } from 'lucide-react';
+import { Download, Lock, RefreshCw, Key } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
-import { getFiles, downloadFile } from '../../services/api';
+import { getFiles, downloadFile, listVaultKeys } from '../../services/api';
+import { VaultDialog } from '../vault/VaultDialog';
 
 const ClassificationBadge = ({ level }) => {
     const styles = {
@@ -22,6 +23,9 @@ export const FileList = ({ token }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [downloadingId, setDownloadingId] = useState(null);
+    const [showVaultDialog, setShowVaultDialog] = useState(false);
+    const [vaultKeys, setVaultKeys] = useState([]);
+    const [currentFileForDownload, setCurrentFileForDownload] = useState(null);
 
     const fetchFiles = async () => {
         if (!token) return;
@@ -39,8 +43,20 @@ export const FileList = ({ token }) => {
         }
     };
 
+    const fetchVaultKeys = async () => {
+        try {
+            const response = await listVaultKeys(token);
+            console.log('🔍 DEBUG: Vault keys response:', response);
+            console.log('🔍 DEBUG: Number of keys:', response.keys?.length);
+            setVaultKeys(response.keys || []);
+        } catch (err) {
+            console.error('Failed to fetch vault keys:', err);
+        }
+    };
+
     useEffect(() => {
         fetchFiles();
+        fetchVaultKeys();
     }, [token]);
 
     const handleDownload = async (file) => {
@@ -64,6 +80,37 @@ export const FileList = ({ token }) => {
             alert(`Download failed: ${err.message}`);
         } finally {
             setDownloadingId(null);
+        }
+    };
+
+    const handleVaultDownload = async (file) => {
+        setCurrentFileForDownload(file);
+        // Refresh vault keys before showing dialog
+        await fetchVaultKeys();
+        setShowVaultDialog(true);
+    };
+
+    const handleVaultKeyRetrieved = async (hexKey) => {
+        if (!currentFileForDownload) return;
+
+        setDownloadingId(currentFileForDownload.file_id);
+        try {
+            const blob = await downloadFile(currentFileForDownload.file_id, hexKey, token);
+
+            // Create download link
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = currentFileForDownload.filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } catch (err) {
+            alert(`Download failed: ${err.message}`);
+        } finally {
+            setDownloadingId(null);
+            setCurrentFileForDownload(null);
         }
     };
 
@@ -123,20 +170,43 @@ export const FileList = ({ token }) => {
                                     <td className="p-4 border-r-4 border-black text-sm">{file.total_chunks}</td>
                                     <td className="p-4 border-r-4 border-black text-sm">{file.owner_id}</td>
                                     <td className="p-4">
-                                        <Button
-                                            onClick={() => handleDownload(file)}
-                                            disabled={downloadingId === file.file_id}
-                                            className="py-1 px-3 text-sm flex items-center gap-2 bg-brutal-blue text-white hover:bg-blue-600"
-                                        >
-                                            <Download size={14} />
-                                            {downloadingId === file.file_id ? 'DOWNLOADING...' : 'DOWNLOAD'}
-                                        </Button>
+                                        <div className="flex gap-2">
+                                            <Button
+                                                onClick={() => handleVaultDownload(file)}
+                                                disabled={downloadingId === file.file_id}
+                                                className="py-1 px-3 text-xs flex items-center gap-1 bg-brutal-yellow text-black hover:bg-yellow-500 border-4 border-black"
+                                            >
+                                                <Key size={14} />
+                                                VAULT KEY
+                                            </Button>
+                                            <Button
+                                                onClick={() => handleDownload(file)}
+                                                disabled={downloadingId === file.file_id}
+                                                className="py-1 px-3 text-xs flex items-center gap-1 bg-brutal-blue text-white hover:bg-blue-600"
+                                            >
+                                                <Download size={14} />
+                                                {downloadingId === file.file_id ? 'DOWNLOADING...' : 'MANUAL'}
+                                            </Button>
+                                        </div>
                                     </td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 </div>
+            )}
+
+            {/* Vault Dialog */}
+            {showVaultDialog && (
+                <VaultDialog
+                    onRetrieve={handleVaultKeyRetrieved}
+                    onClose={() => {
+                        setShowVaultDialog(false);
+                        setCurrentFileForDownload(null);
+                    }}
+                    vaultKeys={vaultKeys}
+                    token={token}
+                />
             )}
         </div>
     );
