@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Card } from '../../components/ui/Card';
-import { Button } from '../../components/ui/Button';
-import { Input } from '../../components/ui/Input';
+import { Link } from 'react-router-dom';
+import { Shield, Lock } from 'lucide-react';
+import { Footer } from '../../components/Footer';
 import { login as apiLogin } from '../../services/api';
 
 export const Login = ({ onLogin }) => {
@@ -46,66 +46,114 @@ export const Login = ({ onLogin }) => {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-brutal-bg p-4">
-            <div className="max-w-md w-full">
-                <div className="mb-8 text-center">
-                    <h1 className="text-5xl font-black mb-2 stroke-black">VAJRA</h1>
-                    <p className="font-mono text-sm bg-black text-white inline-block px-2 py-1">SECURE FILE TRANSFER SYSTEM</p>
-                </div>
+        <div className="min-h-screen bg-brutal-bg flex flex-col p-6">
+            {/* Main Content */}
+            <div className="flex-1 flex items-center justify-center">
+                <div className="max-w-2xl w-full">
+                    {/* Header */}
+                    <div className="text-center mb-12">
+                        <Link to="/" className="inline-block mb-8 p-8 bg-brutal-yellow border-8 border-black shadow-hard-xl hover:shadow-hard-lg hover:-translate-y-1 transition-all">
+                            <h1 className="text-7xl font-black tracking-tighter">VAJRA</h1>
+                        </Link>
+                        <p className="text-2xl font-mono font-black uppercase mb-2">
+                            Satellite Telemetry Exchange
+                        </p>
+                        <p className="text-lg font-bold mb-6">SECURE ACCESS TERMINAL</p>
+                    </div>
 
-                <Card title={step === 'login' ? 'IDENTIFY YOURSELF' : 'SECURITY CHECK'}>
-                    {error && (
-                        <div className="bg-red-100 border-4 border-red-600 p-3 mb-4 font-mono text-sm text-red-800">
-                            ⚠️ ERROR: {error}
+                    {/* Login Card */}
+                    <div className="bg-white border-8 border-black shadow-hard-xl p-10">
+                        {/* Card Header */}
+                        <div className="mb-8 flex items-center gap-4">
+                            {step === 'login' ? (
+                                <>
+                                    <Shield size={40} className="stroke-[3px]" />
+                                    <h2 className="text-3xl font-black">IDENTIFY YOURSELF</h2>
+                                </>
+                            ) : (
+                                <>
+                                    <Lock size={40} className="stroke-[3px]" />
+                                    <h2 className="text-3xl font-black">SECURITY CHECK</h2>
+                                </>
+                            )}
                         </div>
-                    )}
 
-                    {step === 'login' ? (
-                        <form onSubmit={handleLogin} className="space-y-4">
-                            <div>
-                                <label className="block font-mono font-bold mb-1">USERNAME</label>
-                                <Input
-                                    placeholder="commander"
-                                    value={username}
-                                    onChange={(e) => setUsername(e.target.value)}
-                                    required
-                                />
+                        {/* Error Display */}
+                        {error && (
+                            <div className="bg-brutal-pink text-white border-6 border-black p-4 mb-6 font-mono shadow-hard-sm">
+                                <p className="font-bold">⚠️ ERROR: {error}</p>
                             </div>
-                            <div>
-                                <label className="block font-mono font-bold mb-1">PASSWORD</label>
-                                <Input
-                                    type="password"
-                                    placeholder="••••••••••••"
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    required
-                                />
-                            </div>
-                            <Button type="submit" className="w-full mt-4" disabled={loading}>
-                                {loading ? 'AUTHENTICATING...' : 'INITIATE SESSION'}
-                            </Button>
-                        </form>
-                    ) : (
-                        <form onSubmit={handleMfaVerify} className="space-y-4">
-                            <div className="bg-yellow-100 border-l-4 border-black p-4 mb-4 font-mono text-sm">
-                                ⚠️ MFA REQ: Enter code from authenticator.
-                            </div>
-                            <div>
-                                <label className="block font-mono font-bold mb-1">MFA CODE</label>
-                                <Input
-                                    placeholder="000 000"
-                                    className="text-center tracking-widest text-xl"
-                                    value={mfaCode}
-                                    onChange={(e) => setMfaCode(e.target.value)}
-                                />
-                            </div>
-                            <Button type="submit" className="w-full mt-4 bg-brutal-pink text-white hover:bg-pink-600">
-                                VERIFY IDENTITY
-                            </Button>
-                        </form>
-                    )}
-                </Card>
+                        )}
+
+                        {/* Login Form */}
+                        {step === 'login' ? (
+                            <form onSubmit={handleLogin} className="space-y-6">
+                                <div>
+                                    <label className="block font-mono font-bold text-lg mb-2">USERNAME</label>
+                                    <input
+                                        type="text"
+                                        placeholder="commander"
+                                        value={username}
+                                        onChange={(e) => setUsername(e.target.value)}
+                                        required
+                                        className="w-full p-4 border-6 border-black shadow-hard-sm focus:outline-none focus:shadow-hard transition-all font-mono text-lg"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block font-mono font-bold text-lg mb-2">PASSWORD</label>
+                                    <input
+                                        type="password"
+                                        placeholder="••••••••••••"
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        required
+                                        className="w-full p-4 border-6 border-black shadow-hard-sm focus:outline-none focus:shadow-hard transition-all font-mono text-lg"
+                                    />
+                                </div>
+                                <button
+                                    type="submit"
+                                    disabled={loading}
+                                    className="w-full brutal-btn bg-brutal-blue text-white text-xl py-4 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {loading ? 'AUTHENTICATING...' : 'INITIATE SESSION'}
+                                </button>
+                            </form>
+                        ) : (
+                            <form onSubmit={handleMfaVerify} className="space-y-6">
+                                <div className="bg-brutal-yellow border-6 border-black p-4 mb-6 font-mono shadow-hard-sm">
+                                    <p className="font-bold">⚠️ MFA REQUIRED: Enter code from authenticator</p>
+                                </div>
+                                <div>
+                                    <label className="block font-mono font-bold text-lg mb-2">MFA CODE</label>
+                                    <input
+                                        type="text"
+                                        placeholder="000 000"
+                                        value={mfaCode}
+                                        onChange={(e) => setMfaCode(e.target.value)}
+                                        className="w-full p-4 border-6 border-black shadow-hard-sm focus:outline-none focus:shadow-hard transition-all font-mono text-xl text-center tracking-widest"
+                                    />
+                                </div>
+                                <button
+                                    type="submit"
+                                    className="w-full brutal-btn bg-brutal-pink text-white text-xl py-4"
+                                >
+                                    VERIFY IDENTITY
+                                </button>
+                            </form>
+                        )}
+
+                        {/* Back Link */}
+                        <div className="mt-6 text-center">
+                            <Link to="/" className="font-mono text-sm hover:underline">
+                                ← Back to Home
+                            </Link>
+                        </div>
+                    </div>
+                </div>
             </div>
+
+            {/* Footer */}
+            <Footer />
         </div>
     );
 };
