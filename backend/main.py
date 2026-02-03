@@ -18,6 +18,14 @@ from crypto_utils import generate_encryption_key, generate_iv, encrypt_chunk, de
 from storage_service import upload_chunk_to_supabase, save_file_metadata, get_file_metadata, download_chunk_from_supabase, log_audit_event, list_files
 from vault_service import encrypt_key_for_vault, decrypt_key_from_vault
 
+# Import authentication and MFA services
+from auth_service import (
+    get_user_by_email, create_user, update_last_login,
+    log_activity, get_activity_logs, check_permission,
+    list_all_users, get_user_permissions, verify_password, get_user_by_id
+)
+from email_verification import send_verification_email, verify_user_code
+
 
 # Constants
 CHUNK_SIZE = 512 * 1024  # 512KB chunks
@@ -43,6 +51,29 @@ app.add_middleware(
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class LoginPasswordRequest(BaseModel):
+    email: str
+    password: str
+
+
+class LoginMFARequest(BaseModel):
+    email: str
+    mfa_code: str
+
+
+class CreateUserRequest(BaseModel):
+    email: str
+    username: str
+    password: str
+    role: str  # admin, manager, engineer, staff
+    can_upload: Optional[bool] = None
+    can_download: Optional[bool] = None
+
+
+class VaultMFARequest(BaseModel):
+    email: str
 
 
 def extract_owner_id_from_token(authorization: Optional[str]) -> str:
@@ -182,15 +213,223 @@ async def root():
     return {"status": "ok", "message": "Secure Upload API is running"}
 
 
+# ===== AUTHENTICATION ENDPOINTS (2-STEP MFA) =====
+
+@app.post("/auth/login/password")
+async def login_step1_password(request: LoginPasswordRequest):
+    """
+    Step 1 of login: Verify email and password, then send MFA code.
+    
+    Flow:
+    1. Check if user exists
+    2. Verify password with bcrypt
+    3. Generate MFA code
+    4. Hash and store code in database
+    5. Send code via email
+    6. Log all actions
+    """
+    try:
+        # Fetch user from database
+        user = await get_user_by_email(request.email)
+        
+        if not user:
+            # Log failed login attempt (no user ID since user doesn't exist)
+            await log_activity(
+                user_id=None,
+                action='LOGIN_FAILED',
+                details={'email': request.email, 'reason': 'user_not_found'}
+            )
+            print(f"❌ Login failed: User not found for {request.email}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password"
+            )
+        
+        # Check if user account is active
+        if user['status'] != 'active':
+            await log_activity(
+                user_id=user['user_id'],
+                action='LOGIN_BLOCKED',
+                details={'reason': f"account_{user['status']}", 'email': request.email}
+            )
+            print(f"❌ Login blocked: Account {user['status']} for {request.email}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Account is {user['status']}"
+            )
+        
+        # Verify password using bcrypt
+        if not verify_password(request.password, user['password_hash']):
+            await log_activity(
+                user_id=user['user_id'],
+                action='LOGIN_FAILED',
+                details={'reason': 'invalid_password', 'email': request.email}
+            )
+            print(f"❌ Login failed: Invalid password for {request.email}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password"
+            )
+        
+        # Password verified! Now send MFA code
+        print(f"✅ Password verified for {request.email}, sending MFA code...")
+        
+        # Email configuration
+        sender_email = "karthik.maniam008@gmail.com"
+        app_password = "rpjz ujsm cwbp tjxk"
+        
+        # Send MFA code (code will be hashed and stored in database)
+        mfa_result = await send_verification_email(
+            email=request.email,
+            sender_email=sender_email,
+            app_password=app_password,
+            user_id=user['user_id'],
+            purpose='login'
+        )
+        
+        # Log MFA sent
+        await log_activity(
+            user_id=user['user_id'],
+            action='MFA_SENT',
+            details={
+                'purpose': 'login',
+                'email': request.email,
+                'expires_in_minutes': mfa_result['expires_in_minutes']
+            }
+        )
+        
+        print(f"✅ MFA code sent to {request.email}")
+        
+        return {
+            "success": True,
+            "message": "Password verified. MFA code sent to your email.",
+            "email": request.email,
+            "expires_in_minutes": mfa_result['expires_in_minutes'],
+            "next_step": "Enter the 6-digit code from your email"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Login step 1 failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Login failed: {str(e)}"
+        )
+
+
+@app.post("/auth/login/mfa")
+async def login_step2_mfa(request: LoginMFARequest):
+    """
+    Step 2 of login: Verify MFA code and issue JWT token.
+    
+    Flow:
+    1. Hash the user's submitted code
+    2. Compare with stored hash in database
+    3. Issue JWT token with aal2 (MFA verified)
+    4. Update last login timestamp
+    5. Log successful login
+    """
+    try:
+        # Verify MFA code (will hash user's code and compare with stored hash)
+        verification_result = await verify_user_code(
+            email=request.email,
+            user_code=request.mfa_code,
+            purpose='login'
+        )
+        
+        if not verification_result['success']:
+            # Log failed MFA attempt
+            user = await get_user_by_email(request.email)
+            if user:
+                await log_activity(
+                    user_id=user['user_id'],
+                    action='MFA_FAILED',
+                    details={
+                        'reason': verification_result.get('error'),
+                        'email': request.email
+                    }
+                )
+            print(f"❌ MFA verification failed for {request.email}: {verification_result['message']}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=verification_result['message']
+            )
+        
+        # MFA verified! Fetch user and generate JWT token
+        user = await get_user_by_email(request.email)
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Update last login timestamp
+        await update_last_login(user['user_id'])
+        
+        # Get user permissions
+        permissions = get_user_permissions(user)
+        
+        # Create JWT payload with MFA verified (aal2)
+        payload = {
+            "sub": user['user_id'],
+            "user_id": user['user_id'],
+            "email": user['email'],
+            "username": user['username'],
+            "aal": "aal2",  # MFA completed - important for security!
+            "role": user['role'],
+            "status": user['status'],
+            "permissions": permissions
+        }
+        
+        # Create JWT token (in production, use proper JWT library with signature)
+        header = base64.b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).decode()
+        payload_encoded = base64.b64encode(json.dumps(payload).encode()).decode()
+        jwt_token = f"{header}.{payload_encoded}.mock-signature"
+        
+        # Log successful login
+        await log_activity(
+            user_id=user['user_id'],
+            action='LOGIN_SUCCESS',
+            details={
+                'mfa_verified': True,
+                'email': request.email,
+                'role': user['role']
+            }
+        )
+        
+        print(f"✅ Login successful for {request.email} (role: {user['role']})")
+        
+        return {
+            "success": True,
+            "access_token": jwt_token,
+            "token_type": "bearer",
+            "user": {
+                "user_id": user['user_id'],
+                "email": user['email'],
+                "username": user['username'],
+                "role": user['role'],
+                "status": user['status'],
+                "permissions": permissions
+            }
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ MFA verification failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"MFA verification failed: {str(e)}"
+        )
+
+
 @app.post("/login")
 async def login(request: LoginRequest):
     """
-    Mock login endpoint that issues JWT tokens.
-    
-    For PoC: Accepts any password, assigns role based on username.
-    - 'commander' -> role: commander, status: active
-    - 'viewer' -> role: viewer, status: active
-    - Any other -> role: viewer, status: active
+    OLD mock login endpoint (DEPRECATED - use /auth/login/password and /auth/login/mfa instead).
+    Kept for backward compatibility.
     """
     username = request.username.lower()
     
@@ -719,16 +958,47 @@ async def retrieve_key_from_vault(
     """
     # Extract user_id from JWT
     user_id = extract_owner_id_from_token(authorization)
+    user = await get_user_by_id(user_id)
     
-    print(f"🔍 DEBUG: Retrieving vault key {request.vault_id} for user {user_id}")
+    print(f"🔍 Retrieving vault key {request.vault_id} for user {user_id}")
     
-    # TODO: Verify MFA code
+    # Verify MFA code
+    try:
+        verification_result = await verify_user_code(
+            email=user['email'],
+            user_code=request.mfa_code,
+            purpose='vault_retrieve'
+        )
+        
+        if not verification_result['success']:
+            await log_activity(
+                user_id=user_id,
+                action='VAULT_RETRIEVE_MFA_FAILED',
+                resource_type='vault',
+                resource_id=request.vault_id,
+                details={'reason': verification_result.get('error')}
+            )
+            print(f"❌ MFA verification failed for vault retrieve: {verification_result['message']}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=verification_result['message']
+            )
+        
+        print(f"✅ MFA verified for vault retrieve")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ MFA verification error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"MFA verification failed: {str(e)}"
+        )
     
     try:
         # Fetch encrypted key from database
         vault_entry = await retrieve_vault_key(request.vault_id, user_id)
         
-        print(f"🔍 DEBUG: Found vault entry - file_id: {vault_entry.get('file_id')}, label: {vault_entry.get('key_label')}")
+        print(f"🔍 Found vault entry - file_id: {vault_entry.get('file_id')}, label: {vault_entry.get('key_label')}")
         
         # Decrypt the key using password
         decrypted_hex = decrypt_key_from_vault(
@@ -737,7 +1007,20 @@ async def retrieve_key_from_vault(
             request.password
         )
         
-        print(f"🔍 DEBUG: Decrypted hex key (first 16 chars): {decrypted_hex[:16]}...")
+        # Log successful retrieval
+        await log_activity(
+            user_id=user_id,
+            action='VAULT_RETRIEVE_SUCCESS',
+            resource_type='vault',
+            resource_id=request.vault_id,
+            details={
+                'file_id': vault_entry.get('file_id'),
+                'key_label': vault_entry.get('key_label'),
+                'mfa_verified': True
+            }
+        )
+        
+        print(f"✅ Vault key retrieved successfully (first 16 chars): {decrypted_hex[:16]}...")
         
         return {
             "success": True,
@@ -746,7 +1029,14 @@ async def retrieve_key_from_vault(
             "key_label": vault_entry.get('key_label')
         }
     except Exception as e:
-        print(f"❌ ERROR: Vault retrieval failed: {str(e)}")
+        await log_activity(
+            user_id=user_id,
+            action='VAULT_RETRIEVE_FAILED',
+            resource_type='vault',
+            resource_id=request.vault_id,
+            details={'reason': str(e)}
+        )
+        print(f"❌ Vault retrieval failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Failed to retrieve key: {str(e)}"
@@ -791,3 +1081,593 @@ async def delete_vault_entry(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Failed to delete vault key: {str(e)}"
         )
+
+
+# ===== EMAIL VERIFICATION ENDPOINTS =====
+
+from email_verification import send_verification_email, verify_user_code
+
+
+class SendVerificationRequest(BaseModel):
+    email: str
+
+
+class VerifyCodeRequest(BaseModel):
+    email: str
+    code: str
+
+
+@app.post("/auth/send-verification")
+async def send_verification_code(request: SendVerificationRequest):
+    """
+    Send a 6-digit verification code to the user's email.
+    The code is hashed with bcrypt before storage.
+    
+    Args:
+        email: User's email address
+    
+    Returns:
+        Success message with expiry time
+    """
+    try:
+        # Use the app password from .env in the parent directory
+        sender_email = "karthik.maniam008@gmail.com"
+        app_password = "rpjz ujsm cwbp tjxk"
+        
+        result = await send_verification_email(
+            email=request.email,
+            sender_email=sender_email,
+            app_password=app_password
+        )
+        
+        return result
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to send verification email: {str(e)}"
+        )
+
+
+@app.post("/auth/verify-code")
+async def verify_verification_code(request: VerifyCodeRequest):
+    """
+    Verify the user-submitted 6-digit code.
+    Hashes the submitted code and compares with stored hash.
+    
+    Args:
+        email: User's email address
+        code: 6-digit verification code
+    
+    Returns:
+        Verification result with success status
+    """
+    try:
+        result = await verify_user_code(
+            email=request.email,
+            user_code=request.code
+        )
+        
+        if not result["success"]:
+            # Return appropriate HTTP status based on error type
+            if result.get("error") == "MAX_ATTEMPTS_EXCEEDED":
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=result["message"]
+                )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=result["message"]
+                )
+        
+        return result
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Verification failed: {str(e)}"
+        )
+
+
+# ===== MANUAL MFA SEND ENDPOINT =====
+
+@app.post("/auth/send-mfa")
+async def send_mfa_manually(request: LoginPasswordRequest):
+    """
+    Manually send MFA code (can be triggered by button after password verification).
+    This is a standalone endpoint to debug/resend MFA codes.
+    """
+    try:
+        # Fetch user from database
+        user = await get_user_by_email(request.email)
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Verify password first
+        if not verify_password(request.password, user['password_hash']):
+            await log_activity(
+                user_id=user['user_id'],
+                action='MFA_SEND_FAILED',
+                details={'reason': 'invalid_password', 'email': request.email}
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid password"
+            )
+        
+        print(f"🔐 Manually sending MFA code to {request.email}...")
+        
+        # Email configuration
+        sender_email = "karthik.maniam008@gmail.com"
+        app_password = "rpjz ujsm cwbp tjxk"
+        
+        # Send MFA code
+        mfa_result = await send_verification_email(
+            email=request.email,
+            sender_email=sender_email,
+            app_password=app_password,
+            user_id=user['user_id'],
+            purpose='login'
+        )
+        
+        # Log MFA sent
+        await log_activity(
+            user_id=user['user_id'],
+            action='MFA_SENT_MANUAL',
+            details={
+                'purpose': 'login',
+                'email': request.email,
+                'triggered': 'manual_button'
+            }
+        )
+        
+        print(f"✅ MFA code sent successfully to {request.email}")
+        
+        return {
+            "success": True,
+            "message": f"MFA code sent to {request.email}",
+            "expires_in_minutes": mfa_result['expires_in_minutes']
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Failed to send MFA: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to send MFA code: {str(e)}"
+        )
+
+
+@app.post("/vault/mfa/send")
+async def send_vault_mfa(authorization: Optional[str] = Header(None), purpose: str = "vault_retrieve"):
+    """
+    Send MFA code for vault operations (store or retrieve).
+    Purpose can be 'vault_store' or 'vault_retrieve'.
+    """
+    # Extract user from token
+    user_id = extract_owner_id_from_token(authorization)
+    user = await get_user_by_id(user_id)
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    try:
+        print(f"🔐 Sending vault MFA code to {user['email']} (purpose: {purpose})...")
+        
+        # Email configuration
+        sender_email = "karthik.maniam008@gmail.com"
+        app_password = "rpjz ujsm cwbp tjxk"
+        
+        # Send MFA code
+        mfa_result = await send_verification_email(
+            email=user['email'],
+            sender_email=sender_email,
+            app_password=app_password,
+            user_id=user['user_id'],
+            purpose=purpose
+        )
+        
+        # Log MFA sent
+        await log_activity(
+            user_id=user['user_id'],
+            action='VAULT_MFA_SENT',
+            details={
+                'purpose': purpose,
+                'email': user['email']
+            }
+        )
+        
+        print(f"✅ Vault MFA code sent to {user['email']}")
+        
+        return {
+            "success": True,
+            "message": f"MFA code sent to {user['email']}",
+            "email": user['email'],
+            "expires_in_minutes": mfa_result['expires_in_minutes']
+        }
+    
+    except Exception as e:
+        print(f"❌ Failed to send vault MFA: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to send MFA code: {str(e)}"
+        )
+
+
+# ===== ADMIN ENDPOINTS =====
+
+@app.post("/admin/vault/migrate")
+async def migrate_vault_keys(authorization: Optional[str] = Header(None)):
+    """
+    Migrate old vault keys from username-based user_ids to new UUID-based user_ids.
+    This fixes the issue where old vault keys can't be accessed with new authentication.
+    """
+    # Extract user from token
+    requesting_user_id = extract_owner_id_from_token(authorization)
+    requesting_user = await get_user_by_id(requesting_user_id)
+    
+    # Check if requester is admin
+    if requesting_user['role'] != 'admin':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can migrate vault keys"
+        )
+    
+    try:
+        from storage_service import supabase
+        
+        # Get all vault entries
+        vault_response = supabase.table('user_vaults').select('*').execute()
+        all_vaults = vault_response.data
+        
+        print(f"📊 Found {len(all_vaults)} total vault entries")
+        
+        # Get all users from new users table
+        users_response = supabase.table('users').select('user_id, email, username').execute()
+        all_users = users_response.data
+        
+        # Create mapping: old_username -> new_uuid
+        username_to_uuid = {user['username']: user['user_id'] for user in all_users}
+        email_to_uuid = {user['email']: user['user_id'] for user in all_users}
+        
+        print(f"👥 User mappings:")
+        for username, uuid in username_to_uuid.items():
+            print(f"   {username} -> {uuid}")
+        
+        # Migrate vault entries
+        migrated_count = 0
+        skipped_count = 0
+        
+        for vault in all_vaults:
+            old_user_id = vault['user_id']
+            
+            # Check if it's already a UUID (new format)
+            if len(old_user_id) == 36 and '-' in old_user_id:
+                print(f"⏭️  Skipping vault_id {vault['vault_id'][:20]}... (already UUID)")
+                skipped_count += 1
+                continue
+            
+            # Map old username to new UUID
+            new_user_id = username_to_uuid.get(old_user_id)
+            
+            # Try email mapping if username fails
+            if not new_user_id:
+                new_user_id = email_to_uuid.get(old_user_id)
+            
+            if new_user_id:
+                # Update the vault entry
+                supabase.table('user_vaults')\
+                    .update({'user_id': new_user_id})\
+                    .eq('vault_id', vault['vault_id'])\
+                    .execute()
+                
+                print(f"✅ Migrated: {old_user_id} -> {new_user_id} (vault: {vault.get('key_label', 'N/A')})")
+                migrated_count += 1
+            else:
+                print(f"⚠️  No mapping found for user_id: {old_user_id}")
+        
+        # Log migration
+        await log_activity(
+            user_id=requesting_user_id,
+            action='VAULT_MIGRATION',
+            details={
+                'total_vaults': len(all_vaults),
+                'migrated': migrated_count,
+                'skipped': skipped_count
+            }
+        )
+        
+        return {
+            "success": True,
+            "message": "Vault migration completed",
+            "total_vaults": len(all_vaults),
+            "migrated": migrated_count,
+            "skipped": skipped_count,
+            "mappings": {k: v for k, v in username_to_uuid.items()}
+        }
+    
+    except Exception as e:
+        print(f"❌ Vault migration failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Migration failed: {str(e)}"
+        )
+
+
+@app.post("/admin/users/create")
+async def create_new_user(request: CreateUserRequest, authorization: Optional[str] = Header(None)):
+    """
+    Create a new user (Admin only).
+    
+    Only users with admin role can create new users.
+    All user creation actions are logged.
+    """
+    # Extract user from token
+    requesting_user_id = extract_owner_id_from_token(authorization)
+    requesting_user = await get_user_by_id(requesting_user_id)
+    
+    # Check if requester is admin
+    if requesting_user['role'] != 'admin':
+        await log_activity(
+            user_id=requesting_user_id,
+            action='CREATE_USER_DENIED',
+            details={'reason': 'insufficient_permissions', 'requested_email': request.email}
+        )
+        print(f"❌ User creation denied for {requesting_user['email']} (not admin)")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can create users"
+        )
+    
+    try:
+        # Determine permissions based on role if not specified
+        from auth_service import DEFAULT_PERMISSIONS
+        role_defaults = DEFAULT_PERMISSIONS.get(request.role, DEFAULT_PERMISSIONS['staff'])
+        
+        can_upload = request.can_upload if request.can_upload is not None else role_defaults['can_upload']
+        can_download = request.can_download if request.can_download is not None else role_defaults['can_download']
+        
+        # Create user
+        new_user = await create_user(
+            email=request.email,
+            username=request.username,
+            password=request.password,
+            role=request.role,
+            can_upload=can_upload,
+            can_download=can_download,
+            created_by_user_id=requesting_user_id
+        )
+        
+        # Log user creation
+        await log_activity(
+            user_id=requesting_user_id,
+            action='CREATE_USER',
+            resource_type='user',
+            resource_id=new_user['user_id'],
+            details={
+                'created_email': request.email,
+                'created_username': request.username,
+                'created_role': request.role,
+                'can_upload': can_upload,
+                'can_download': can_download
+            }
+        )
+        
+        print(f"✅ User created: {request.email} (role: {request.role}) by {requesting_user['email']}")
+        
+        return {
+            "success": True,
+            "message": f"User {request.email} created successfully",
+            "user": {
+                "user_id": new_user['user_id'],
+                "email": new_user['email'],
+                "username": new_user['username'],
+                "role": new_user['role'],
+                "can_upload": new_user['can_upload'],
+                "can_download": new_user['can_download']
+            }
+        }
+    
+    except ValueError as e:
+        await log_activity(
+            user_id=requesting_user_id,
+            action='CREATE_USER_FAILED',
+            details={'reason': str(e), 'requested_email': request.email}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        await log_activity(
+            user_id=requesting_user_id,
+            action='CREATE_USER_FAILED',
+            details={'reason': str(e), 'requested_email': request.email}
+        )
+        print(f"❌ User creation failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create user: {str(e)}"
+        )
+
+
+@app.get("/admin/users/list")
+async def list_users(authorization: Optional[str] = Header(None)):
+    """
+    List all users (Admin only).
+    
+    Returns user details without password hashes.
+    """
+    # Extract user from token
+    requesting_user_id = extract_owner_id_from_token(authorization)
+    requesting_user = await get_user_by_id(requesting_user_id)
+    
+    # Check if requester is admin
+    if requesting_user['role'] != 'admin':
+        await log_activity(
+            user_id=requesting_user_id,
+            action='LIST_USERS_DENIED',
+            details={'reason': 'insufficient_permissions'}
+        )
+        print(f"❌ List users denied for {requesting_user['email']} (not admin)")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can list users"
+        )
+    
+    try:
+        users = await list_all_users(requesting_user['role'])
+        
+        # Log activity
+        await log_activity(
+            user_id=requesting_user_id,
+            action='LIST_USERS',
+            details={'count': len(users)}
+        )
+        
+        print(f"✅ User list retrieved by {requesting_user['email']} ({len(users)} users)")
+        
+        return {
+            "success": True,
+            "users": users,
+            "count": len(users)
+        }
+    
+    except Exception as e:
+        await log_activity(
+            user_id=requesting_user_id,
+            action='LIST_USERS_FAILED',
+            details={'reason': str(e)}
+        )
+        print(f"❌ List users failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list users: {str(e)}"
+        )
+
+
+@app.get("/admin/logs")
+async def view_activity_logs(
+    authorization: Optional[str] = Header(None),
+    user_id: Optional[str] = None,
+    action: Optional[str] = None,
+    limit: int = 100
+):
+    """
+    View activity logs (Admin only).
+    
+    Allows filtering by user_id, action type, and limit.
+    Returns comprehensive audit trail of all system activities.
+    
+    Args:
+        user_id: Filter by specific user (optional)
+        action: Filter by action type (optional)
+        limit: Maximum number of logs to return (default: 100)
+    """
+    # Extract user from token
+    requesting_user_id = extract_owner_id_from_token(authorization)
+    requesting_user = await get_user_by_id(requesting_user_id)
+    
+    # Check if requester is admin
+    if requesting_user['role'] != 'admin':
+        await log_activity(
+            user_id=requesting_user_id,
+            action='VIEW_LOGS_DENIED',
+            details={'reason': 'insufficient_permissions'}
+        )
+        print(f"❌ View logs denied for {requesting_user['email']} (not admin)")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can view logs"
+        )
+    
+    try:
+        logs = await get_activity_logs(
+            user_id=user_id,
+            limit=limit,
+            action_filter=action
+        )
+        
+        # Log this action (admin viewed logs)
+        await log_activity(
+            user_id=requesting_user_id,
+            action='VIEW_LOGS',
+            details={
+                'filter_user_id': user_id,
+                'filter_action': action,
+                'limit': limit,
+                'results_count': len(logs)
+            }
+        )
+        
+        print(f"✅ Logs retrieved by {requesting_user['email']} ({len(logs)} entries)")
+        
+        return {
+            "success": True,
+            "logs": logs,
+            "count": len(logs),
+            "filters": {
+                "user_id": user_id,
+                "action": action,
+                "limit": limit
+            }
+        }
+    
+    except Exception as e:
+        await log_activity(
+            user_id=requesting_user_id,
+            action='VIEW_LOGS_FAILED',
+            details={'reason': str(e)}
+        )
+        print(f"❌ View logs failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch logs: {str(e)}"
+        )
+
+
+@app.get("/user/permissions")
+async def get_my_permissions(authorization: Optional[str] = Header(None)):
+    """
+    Get current user's permissions.
+    
+    Returns the authenticated user's role and permission flags.
+    """
+    user_id = extract_owner_id_from_token(authorization)
+    user = await get_user_by_id(user_id)
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    permissions = get_user_permissions(user)
+    
+    return {
+        "success": True,
+        "user": {
+            "user_id": user['user_id'],
+            "email": user['email'],
+            "username": user['username'],
+            "role": user['role']
+        },
+        "permissions": permissions
+    }
