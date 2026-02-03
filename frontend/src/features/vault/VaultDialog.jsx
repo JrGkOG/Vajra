@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { X, Lock } from 'lucide-react';
+import { X, Lock, Mail } from 'lucide-react';
 
 export const VaultDialog = ({ onRetrieve, onClose, vaultKeys, token, onRefresh }) => {
     const [selectedVaultId, setSelectedVaultId] = useState('');
     const [password, setPassword] = useState('');
     const [mfaCode, setMfaCode] = useState('');
     const [loading, setLoading] = useState(false);
+    const [sendingMFA, setSendingMFA] = useState(false);
     const [error, setError] = useState('');
+    const [successMessage, setSuccessMessage] = useState('');
     const [localKeys, setLocalKeys] = useState(vaultKeys);
 
     // Update local keys when prop changes
@@ -15,6 +17,24 @@ export const VaultDialog = ({ onRetrieve, onClose, vaultKeys, token, onRefresh }
         console.log('🔍 VaultDialog: Number of keys:', vaultKeys?.length);
         setLocalKeys(vaultKeys);
     }, [vaultKeys]);
+
+    const handleSendMFA = async () => {
+        setError('');
+        setSuccessMessage('');
+        setSendingMFA(true);
+
+        try {
+            const { sendVaultMFA } = await import('../../services/api');
+            const result = await sendVaultMFA(token, 'vault_retrieve');
+
+            console.log('✅ MFA code sent for vault retrieval');
+            setSuccessMessage(`Code sent to ${result.email}`);
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setSendingMFA(false);
+        }
+    };
 
     const handleRetrieve = async (e) => {
         e.preventDefault();
@@ -59,6 +79,14 @@ export const VaultDialog = ({ onRetrieve, onClose, vaultKeys, token, onRefresh }
                     </div>
                 )}
 
+                {/* Success Message */}
+                {successMessage && (
+                    <div className="bg-brutal-green text-white border-6 border-black p-4 mb-6 font-mono shadow-hard-sm">
+                        <p className="font-bold">✅ {successMessage}</p>
+                        <p className="text-sm mt-1">Check your email for the 6-digit code</p>
+                    </div>
+                )}
+
                 <form onSubmit={handleRetrieve} className="space-y-6">
                     {/* Select Vault Key */}
                     <div>
@@ -100,12 +128,25 @@ export const VaultDialog = ({ onRetrieve, onClose, vaultKeys, token, onRefresh }
                         />
                     </div>
 
-                    {/* MFA Code */}
+                    {/* MFA Code Section */}
                     <div>
                         <label className="block font-mono font-bold text-lg mb-2">MFA CODE</label>
+
+                        {/* Send MFA Button */}
+                        <button
+                            type="button"
+                            onClick={handleSendMFA}
+                            disabled={sendingMFA}
+                            className="w-full brutal-btn bg-brutal-yellow text-black py-3 mb-3 disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                            <Mail size={20} className="stroke-[3px]" />
+                            {sendingMFA ? 'SENDING CODE...' : 'SEND MFA CODE TO EMAIL'}
+                        </button>
+
+                        {/* MFA Input */}
                         <input
                             type="text"
-                            placeholder="000 000"
+                            placeholder="000000"
                             value={mfaCode}
                             onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                             required
