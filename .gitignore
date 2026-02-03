@@ -21,3 +21,4 @@ backend/downloads/
 *.swp
 *.swo
 commit.sh
+./node_modules
