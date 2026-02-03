@@ -1,28 +1,31 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Lock } from 'lucide-react';
+import { Shield, Lock, Mail } from 'lucide-react';
 import { Footer } from '../../components/Footer';
-import { login as apiLogin } from '../../services/api';
+import { loginPassword, loginMFA } from '../../services/api';
 
 export const Login = ({ onLogin }) => {
     const [step, setStep] = useState('login'); // login | mfa
-    const [username, setUsername] = useState('');
+    const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [mfaCode, setMfaCode] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [successMessage, setSuccessMessage] = useState('');
 
     const handleLogin = async (e) => {
         e.preventDefault();
         setError('');
+        setSuccessMessage('');
         setLoading(true);
 
         try {
-            const response = await apiLogin(username, password);
-            console.log("✅ Login successful:", response);
+            // Step 1: Send email + password, backend sends MFA code
+            const response = await loginPassword(email, password);
+            console.log("✅ Password verified, MFA code sent to email");
 
-            // For this PoC, we'll simulate MFA step
-            setStep('mfa');
+            setSuccessMessage(response.message);
+            setStep('mfa'); // Move to MFA verification step
         } catch (err) {
             setError(err.message);
         } finally {
@@ -32,16 +35,22 @@ export const Login = ({ onLogin }) => {
 
     const handleMfaVerify = async (e) => {
         e.preventDefault();
+        setError('');
+        setLoading(true);
 
-        // Simulate MFA verification (in real app, call backend)
         try {
-            const response = await apiLogin(username, password);
+            // Step 2: Verify MFA code
+            const response = await loginMFA(email, mfaCode);
+            console.log("✅ MFA verified, logging in:", response);
+
             onLogin({
                 user: response.user,
                 token: response.access_token
             });
         } catch (err) {
             setError(err.message);
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -85,16 +94,23 @@ export const Login = ({ onLogin }) => {
                             </div>
                         )}
 
+                        {/* Success Message */}
+                        {successMessage && (
+                            <div className="bg-brutal-green text-white border-6 border-black p-4 mb-6 font-mono shadow-hard-sm">
+                                <p className="font-bold">✅ {successMessage}</p>
+                            </div>
+                        )}
+
                         {/* Login Form */}
                         {step === 'login' ? (
                             <form onSubmit={handleLogin} className="space-y-6">
                                 <div>
-                                    <label className="block font-mono font-bold text-lg mb-2">USERNAME</label>
+                                    <label className="block font-mono font-bold text-lg mb-2">EMAIL</label>
                                     <input
-                                        type="text"
-                                        placeholder="commander"
-                                        value={username}
-                                        onChange={(e) => setUsername(e.target.value)}
+                                        type="email"
+                                        placeholder="admin@vajra.mil"
+                                        value={email}
+                                        onChange={(e) => setEmail(e.target.value)}
                                         required
                                         className="w-full p-4 border-6 border-black shadow-hard-sm focus:outline-none focus:shadow-hard transition-all font-mono text-lg"
                                     />
@@ -115,29 +131,34 @@ export const Login = ({ onLogin }) => {
                                     disabled={loading}
                                     className="w-full brutal-btn bg-brutal-blue text-white text-xl py-4 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
-                                    {loading ? 'AUTHENTICATING...' : 'INITIATE SESSION'}
+                                    {loading ? 'SENDING MFA CODE...' : 'SEND MFA CODE'}
                                 </button>
                             </form>
                         ) : (
                             <form onSubmit={handleMfaVerify} className="space-y-6">
                                 <div className="bg-brutal-yellow border-6 border-black p-4 mb-6 font-mono shadow-hard-sm">
-                                    <p className="font-bold">⚠️ MFA REQUIRED: Enter code from authenticator</p>
+                                    <p className="font-bold text-center">📧 CHECK YOUR EMAIL</p>
+                                    <p className="text-sm mt-2">{email}</p>
+                                    <p className="text-sm mt-2">Enter the 6-digit code we sent you</p>
                                 </div>
                                 <div>
                                     <label className="block font-mono font-bold text-lg mb-2">MFA CODE</label>
                                     <input
                                         type="text"
-                                        placeholder="000 000"
+                                        placeholder="000000"
                                         value={mfaCode}
                                         onChange={(e) => setMfaCode(e.target.value)}
+                                        maxLength="6"
+                                        required
                                         className="w-full p-4 border-6 border-black shadow-hard-sm focus:outline-none focus:shadow-hard transition-all font-mono text-xl text-center tracking-widest"
                                     />
                                 </div>
                                 <button
                                     type="submit"
-                                    className="w-full brutal-btn bg-brutal-pink text-white text-xl py-4"
+                                    disabled={loading}
+                                    className="w-full brutal-btn bg-brutal-pink text-white text-xl py-4 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
-                                    VERIFY IDENTITY
+                                    {loading ? 'VERIFYING...' : 'VERIFY & LOGIN'}
                                 </button>
                             </form>
                         )}
