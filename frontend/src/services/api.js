@@ -5,10 +5,53 @@
 const API_BASE_URL = 'http://localhost:8000';
 
 /**
- * Login user and get JWT token
- * @param {string} username 
+ * Step 1: Send email and password, receive MFA code via email
+ * @param {string} email 
  * @param {string} password 
- * @returns {Promise<{access_token: string, user: object}>}
+ * @returns {Promise<{success: boolean, message: string}>}
+ */
+export async function loginPassword(email, password) {
+    const response = await fetch(`${API_BASE_URL}/auth/login/password`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password })
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Password verification failed');
+    }
+
+    return await response.json();
+}
+
+/**
+ * Step 2: Verify MFA code and get JWT token
+ * @param {string} email 
+ * @param {string} mfaCode - 6-digit code from email
+ * @returns {Promise<{success: boolean, access_token: string, user: object}>}
+ */
+export async function loginMFA(email, mfaCode) {
+    const response = await fetch(`${API_BASE_URL}/auth/login/mfa`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, mfa_code: mfaCode })
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'MFA verification failed');
+    }
+
+    return await response.json();
+}
+
+/**
+ * OLD Login (DEPRECATED - kept for backward compatibility)
  */
 export async function login(username, password) {
     const response = await fetch(`${API_BASE_URL}/login`, {
@@ -101,6 +144,27 @@ export async function downloadFile(fileId, encryptionKey, token) {
 // ===== VAULT API FUNCTIONS =====
 
 /**
+ * Send MFA code for vault operations
+ * @param {string} token - JWT token
+ * @param {string} purpose - 'vault_store' or 'vault_retrieve'
+ */
+export async function sendVaultMFA(token, purpose = 'vault_retrieve') {
+    const response = await fetch(`${API_BASE_URL}/vault/mfa/send?purpose=${purpose}`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${token}`
+        }
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to send MFA code');
+    }
+
+    return await response.json();
+}
+
+/**
  * Store encryption key in vault
  * @param {string} hexKey - Encryption key in hex format
  * @param {string} password - Vault password
@@ -127,7 +191,7 @@ export async function storeKeyInVault(hexKey, password, mfaCode, fileId, keyLabe
 
     if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.detail ||'Failed to store key in vault');
+        throw new Error(error.detail || 'Failed to store key in vault');
     }
 
     return await response.json();
