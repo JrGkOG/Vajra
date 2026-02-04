@@ -55,8 +55,8 @@ export const Upload = ({ token }) => {
         setUploadResult(null);
 
         try {
-            // Step 1: Upload file
-            const result = await uploadFile(file, classification, token);
+            // Step 1: Upload file (with vault password for digital signature)
+            const result = await uploadFile(file, classification, token, vaultPassword);
 
             // Step 2: Save key to vault if option is checked
             if (saveToVault) {
