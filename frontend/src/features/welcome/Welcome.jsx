@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Lock, Zap, Database, ArrowRight } from 'lucide-react';
+import { Shield, Lock, Zap, Database, ArrowRight, BookOpen } from 'lucide-react';
 import { Footer } from '../../components/Footer';
 
 export const Welcome = () => {
@@ -81,12 +81,22 @@ export const Welcome = () => {
                     <div className="text-center">
                         <Link
                             to="/login"
-                            className="brutal-btn bg-brutal-orange text-white text-2xl flex items-center gap-4 mx-auto"
+                            className="brutal-btn bg-brutal-orange text-white text-2xl flex items-center gap-4 mx-auto mb-6"
                         >
                             <span>ENTER SYSTEM</span>
                             <ArrowRight size={32} className="stroke-[3px]" />
                         </Link>
-                        <p className="mt-8 text-lg font-mono font-bold">
+
+                        {/* Documentation Button */}
+                        <Link
+                            to="/docs"
+                            className="inline-block font-mono font-bold text-sm px-8 py-4 border-4 border-black bg-brutal-blue text-white hover:bg-blue-700 shadow-hard hover:shadow-hard-sm hover:translate-x-0.5 hover:translate-y-0.5 transition-all mb-6"
+                        >
+                            <BookOpen size={20} className="inline mr-2" />
+                            VIEW FULL DOCUMENTATION
+                        </Link>
+
+                        <p className="mt-4 text-lg font-mono font-bold">
                             🔒 CLEARANCE REQUIRED • AUTHORIZED PERSONNEL ONLY
                         </p>
                     </div>

@@ -165,8 +165,11 @@ export const Login = ({ onLogin }) => {
 
                         {/* Back Link */}
                         <div className="mt-6 text-center">
-                            <Link to="/" className="font-mono text-sm hover:underline">
-                                ← Back to Home
+                            <Link
+                                to="/"
+                                className="inline-block font-mono font-bold text-sm px-6 py-3 border-4 border-black bg-gray-100 hover:bg-gray-200 shadow-hard hover:shadow-hard-sm hover:translate-x-0.5 hover:translate-y-0.5 transition-all"
+                            >
+                                ← BACK TO HOME
                             </Link>
                         </div>
                     </div>

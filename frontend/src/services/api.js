@@ -81,17 +81,19 @@ export async function uploadFile(file, classification, token, vaultPassword = nu
     const formData = new FormData();
     formData.append('file', file);
 
-    // Build URL with classification and optional vault_password for signing
-    let url = `${API_BASE_URL}/upload?classification=${classification}`;
+    // Build headers - vault password sent securely via header, not query param
+    const headers = {
+        'Authorization': `Bearer ${token}`
+    };
+
+    // Security: Send vault password via X-Vault-Password header, not URL
     if (vaultPassword) {
-        url += `&vault_password=${encodeURIComponent(vaultPassword)}`;
+        headers['X-Vault-Password'] = vaultPassword;
     }
 
-    const response = await fetch(url, {
+    const response = await fetch(`${API_BASE_URL}/upload?classification=${classification}`, {
         method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${token}`
-        },
+        headers: headers,
         body: formData
     });
 
@@ -278,24 +280,67 @@ export async function deleteVaultKey(vaultId, token) {
 /**
  * Get system status and metrics
  * @param {string} token - JWT token
- * NOTE: This is currently mocked data. Replace with real backend endpoint when available.
  */
 export async function getSystemStatus(token) {
-    // Try to check if backend is actually online
+    // Check if backend is online using /health endpoint
     try {
-        const response = await fetch(`${API_BASE_URL}/files`, {
-            method: 'HEAD',
-            headers: {
-                'Authorization': `Bearer ${token}`
-            }
+        const healthResponse = await fetch(`${API_BASE_URL}/health`, {
+            method: 'GET'
         });
 
-        // If backend responds, return mock metrics
-        // TODO: Replace with GET /system/status endpoint
+        if (!healthResponse.ok) {
+            throw new Error('Backend unhealthy');
+        }
+
+        // Fetch real file data to calculate storage metrics
+        try {
+            const filesResponse = await fetch(`${API_BASE_URL}/files`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+
+            if (filesResponse.ok) {
+                const filesData = await filesResponse.json();
+                const files = filesData.files || [];
+
+                // Calculate total storage from chunks
+                // Each chunk is approximately 1MB (1024 * 1024 bytes)
+                const CHUNK_SIZE = 1024 * 1024; // 1MB per chunk
+                let totalBytes = 0;
+
+                files.forEach(file => {
+                    totalBytes += (file.total_chunks || 0) * CHUNK_SIZE;
+                });
+
+                // Format storage size
+                let totalStorage;
+                if (totalBytes >= 1024 * 1024 * 1024) {
+                    totalStorage = `${(totalBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+                } else if (totalBytes >= 1024 * 1024) {
+                    totalStorage = `${(totalBytes / (1024 * 1024)).toFixed(1)} MB`;
+                } else if (totalBytes >= 1024) {
+                    totalStorage = `${(totalBytes / 1024).toFixed(1)} KB`;
+                } else {
+                    totalStorage = `${totalBytes} B`;
+                }
+
+                return {
+                    totalFiles: files.length,
+                    totalStorage: totalStorage,
+                    uptime: '48h 32m', // TODO: Get from backend
+                    lastCheck: new Date().toISOString()
+                };
+            }
+        } catch (fileError) {
+            console.error('Error fetching files for storage calculation:', fileError);
+        }
+
+        // Fallback to minimal data if files fetch fails
         return {
-            totalFiles: 42,
-            totalStorage: '128.5 MB',
-            uptime: '48h 32m',
+            totalFiles: 0,
+            totalStorage: '0 MB',
+            uptime: 'Unknown',
             lastCheck: new Date().toISOString()
         };
     } catch (error) {
@@ -341,10 +386,12 @@ export async function getActivityLogs(token, filters = {}) {
  * @param {string} vaultPassword - User's vault password
  */
 export async function generateSignatureKeys(token, vaultPassword) {
-    const response = await fetch(`${API_BASE_URL}/auth/generate-signature-keys?vault_password=${encodeURIComponent(vaultPassword)}`, {
+    // Security: Send vault password via X-Vault-Password header, not URL query param
+    const response = await fetch(`${API_BASE_URL}/auth/generate-signature-keys`, {
         method: 'POST',
         headers: {
-            'Authorization': `Bearer ${token}`
+            'Authorization': `Bearer ${token}`,
+            'X-Vault-Password': vaultPassword
         }
     });
 
@@ -362,10 +409,12 @@ export async function generateSignatureKeys(token, vaultPassword) {
  * @param {string} publicKey - Base64-encoded public key
  */
 export async function registerClientPublicKey(token, publicKey) {
-    const response = await fetch(`${API_BASE_URL}/auth/register-client-public-key?public_key=${encodeURIComponent(publicKey)}`, {
+    // Security: Send public key via X-Public-Key header, not URL query param
+    const response = await fetch(`${API_BASE_URL}/auth/register-client-public-key`, {
         method: 'POST',
         headers: {
-            'Authorization': `Bearer ${token}`
+            'Authorization': `Bearer ${token}`,
+            'X-Public-Key': publicKey
         }
     });
 

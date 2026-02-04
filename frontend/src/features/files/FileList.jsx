@@ -49,6 +49,16 @@ export const FileList = ({ token }) => {
     const [integrityResult, setIntegrityResult] = useState(null);
     const [checkingIntegrity, setCheckingIntegrity] = useState(null);
 
+    // Pagination state
+    const [currentPage, setCurrentPage] = useState(1);
+    const FILES_PER_PAGE = 10;
+
+    // Calculate pagination
+    const totalPages = Math.ceil(files.length / FILES_PER_PAGE);
+    const startIndex = (currentPage - 1) * FILES_PER_PAGE;
+    const endIndex = startIndex + FILES_PER_PAGE;
+    const paginatedFiles = files.slice(startIndex, endIndex);
+
     const fetchFiles = async () => {
         if (!token) return;
 
@@ -58,6 +68,7 @@ export const FileList = ({ token }) => {
         try {
             const response = await getFiles(token);
             setFiles(response.files || []);
+            setCurrentPage(1); // Reset to first page on refresh
         } catch (err) {
             setError(err.message || 'Failed to fetch files');
         } finally {
@@ -186,66 +197,92 @@ export const FileList = ({ token }) => {
                     <p className="text-sm mt-2">Upload a file to get started</p>
                 </div>
             ) : (
-                <div className="overflow-x-auto border-4 border-black shadow-hard">
-                    <table className="w-full text-left font-mono">
-                        <thead className="bg-brutal-bg border-b-4 border-black">
-                            <tr>
-                                <th className="p-4 border-r-4 border-black">FILENAME</th>
-                                <th className="p-4 border-r-4 border-black">CLASS</th>
-                                <th className="p-4 border-r-4 border-black">SIGNATURE</th>
-                                <th className="p-4 border-r-4 border-black">CHUNKS</th>
-                                <th className="p-4 border-r-4 border-black">OWNER</th>
-                                <th className="p-4">ACTION</th>
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white">
-                            {files.map((file, idx) => (
-                                <tr key={file.file_id} className={idx !== files.length - 1 ? 'border-b-4 border-black' : ''}>
-                                    <td className="p-4 border-r-4 border-black font-bold flex items-center gap-2">
-                                        <Lock size={16} /> {file.filename}
-                                    </td>
-                                    <td className="p-4 border-r-4 border-black">
-                                        <ClassificationBadge level={file.classification || 'public'} />
-                                    </td>
-                                    <td className="p-4 border-r-4 border-black">
-                                        <SignatureBadge file={file} />
-                                    </td>
-                                    <td className="p-4 border-r-4 border-black text-sm">{file.total_chunks}</td>
-                                    <td className="p-4 border-r-4 border-black text-sm">{file.owner_id}</td>
-                                    <td className="p-4">
-                                        <div className="flex gap-2">
-                                            <Button
-                                                onClick={() => handleCheckIntegrity(file)}
-                                                disabled={checkingIntegrity === file.file_id}
-                                                className="py-1 px-3 text-xs flex items-center gap-1 bg-green-500 text-white hover:bg-green-600 border-4 border-black"
-                                                title="Verify file integrity"
-                                            >
-                                                <Shield size={14} />
-                                                {checkingIntegrity === file.file_id ? 'CHECKING...' : 'CHECK'}
-                                            </Button>
-                                            <Button
-                                                onClick={() => handleVaultDownload(file)}
-                                                disabled={downloadingId === file.file_id}
-                                                className="py-1 px-3 text-xs flex items-center gap-1 bg-brutal-yellow text-black hover:bg-yellow-500 border-4 border-black"
-                                            >
-                                                <Key size={14} />
-                                                VAULT KEY
-                                            </Button>
-                                            <Button
-                                                onClick={() => handleDownload(file)}
-                                                disabled={downloadingId === file.file_id}
-                                                className="py-1 px-3 text-xs flex items-center gap-1 bg-brutal-blue text-white hover:bg-blue-600"
-                                            >
-                                                <Download size={14} />
-                                                {downloadingId === file.file_id ? 'DOWNLOADING...' : 'MANUAL'}
-                                            </Button>
-                                        </div>
-                                    </td>
+                <>
+                    <div className="overflow-x-auto border-4 border-black shadow-hard">
+                        <table className="w-full text-left font-mono">
+                            <thead className="bg-brutal-bg border-b-4 border-black">
+                                <tr>
+                                    <th className="p-4 border-r-4 border-black">FILENAME</th>
+                                    <th className="p-4 border-r-4 border-black">CLASS</th>
+                                    <th className="p-4 border-r-4 border-black">CHUNKS</th>
+                                    <th className="p-4 border-r-4 border-black">OWNER</th>
+                                    <th className="p-4">ACTION</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                            </thead>
+                            <tbody className="bg-white">
+                                {paginatedFiles.map((file, idx) => (
+                                    <tr key={file.file_id} className={idx !== paginatedFiles.length - 1 ? 'border-b-4 border-black' : ''}>
+                                        <td className="p-4 border-r-4 border-black font-bold flex items-center gap-2">
+                                            <Lock size={16} /> {file.filename}
+                                        </td>
+                                        <td className="p-4 border-r-4 border-black">
+                                            <ClassificationBadge level={file.classification || 'public'} />
+                                        </td>
+                                        <td className="p-4 border-r-4 border-black text-sm">{file.total_chunks}</td>
+                                        <td className="p-4 border-r-4 border-black text-sm">{file.owner_id}</td>
+                                        <td className="p-4">
+                                            <div className="flex gap-1 flex-nowrap">
+                                                <Button
+                                                    onClick={() => handleCheckIntegrity(file)}
+                                                    disabled={checkingIntegrity === file.file_id}
+                                                    className="py-1 px-2 text-xs flex items-center gap-1 bg-green-500 text-white hover:bg-green-600 border-4 border-black whitespace-nowrap"
+                                                    title="Verify file integrity"
+                                                >
+                                                    <Shield size={14} />
+                                                    {checkingIntegrity === file.file_id ? 'CHECKING...' : 'CHECK'}
+                                                </Button>
+                                                <Button
+                                                    onClick={() => handleVaultDownload(file)}
+                                                    disabled={downloadingId === file.file_id}
+                                                    className="py-1 px-2 text-xs flex items-center gap-1 bg-brutal-yellow text-black hover:bg-yellow-500 border-4 border-black whitespace-nowrap"
+                                                >
+                                                    <Key size={14} />
+                                                    KEY
+                                                </Button>
+                                                <Button
+                                                    onClick={() => handleDownload(file)}
+                                                    disabled={downloadingId === file.file_id}
+                                                    className="py-1 px-2 text-xs flex items-center gap-1 bg-brutal-blue text-white hover:bg-blue-600 border-4 border-black whitespace-nowrap"
+                                                >
+                                                    <Download size={14} />
+                                                    {downloadingId === file.file_id ? 'DOWNLOADING...' : 'DL'}
+                                                </Button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* Pagination Controls */}
+                    {totalPages > 1 && (
+                        <div className="flex justify-between items-center mt-4 p-4 bg-white border-4 border-black">
+                            <Button
+                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                disabled={currentPage === 1}
+                                className="py-2 px-4 text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                ← PREV
+                            </Button>
+
+                            <div className="font-mono text-sm">
+                                <span className="font-bold">PAGE {currentPage}</span> of {totalPages}
+                                <span className="ml-4 text-gray-600">
+                                    (Showing {startIndex + 1}-{Math.min(endIndex, files.length)} of {files.length})
+                                </span>
+                            </div>
+
+                            <Button
+                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                disabled={currentPage === totalPages}
+                                className="py-2 px-4 text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                NEXT →
+                            </Button>
+                        </div>
+                    )}
+                </>
             )}
 
             {/* Vault Dialog */}
@@ -281,10 +318,10 @@ export const FileList = ({ token }) => {
                             <div className="space-y-4">
                                 {/* Overall Status */}
                                 <div className={`border-4 p-4 font-mono ${integrityResult.integrity_status === 'VERIFIED'
-                                        ? 'border-green-600 bg-green-50'
-                                        : integrityResult.integrity_status === 'COMPROMISED'
-                                            ? 'border-red-600 bg-red-50'
-                                            : 'border-yellow-600 bg-yellow-50'
+                                    ? 'border-green-600 bg-green-50'
+                                    : integrityResult.integrity_status === 'COMPROMISED'
+                                        ? 'border-red-600 bg-red-50'
+                                        : 'border-yellow-600 bg-yellow-50'
                                     }`}>
                                     <div className="flex items-center gap-2 mb-2">
                                         {integrityResult.integrity_status === 'VERIFIED' ? (
@@ -349,3 +386,4 @@ export const FileList = ({ token }) => {
         </div>
     );
 };
+

@@ -53,6 +53,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Health check endpoint for frontend status checks
+@app.get("/health")
+async def health_check():
+    """Simple health check endpoint - no auth required."""
+    return {"status": "healthy", "service": "vajra-api"}
+
 # Pydantic models
 class LoginRequest(BaseModel):
     username: str
@@ -494,20 +501,26 @@ async def get_files(authorization: Optional[str] = Header(None)):
 
 @app.post("/auth/generate-signature-keys")
 async def generate_signature_keys(
-    vault_password: str,
-    authorization: Optional[str] = Header(None)
+    authorization: Optional[str] = Header(None),
+    x_vault_password: Optional[str] = Header(None, alias="X-Vault-Password")
 ):
     """
     Generate Ed25519 signature key pair for authenticated user (PASSWORD METHOD).
     Private key is encrypted with vault password before storage.
     
     Args:
-        vault_password: User's vault password (for encrypting private key)
         authorization: JWT token
+        x_vault_password: User's vault password (via X-Vault-Password header)
     
     Returns:
         Success message with public key
     """
+    # Security: vault_password now comes from header, not query param
+    if not x_vault_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Vault-Password header is required"
+        )
     # Extract user ID from token
     user_id = extract_owner_id_from_token(authorization)
     
@@ -521,7 +534,7 @@ async def generate_signature_keys(
     
     try:
         # Generate keys
-        public_key_b64, encrypted_private_b64 = generate_user_signature_keys(vault_password)
+        public_key_b64, encrypted_private_b64 = generate_user_signature_keys(x_vault_password)
         
         # Save to database (password method)
         await update_user_signature_keys(
@@ -556,8 +569,8 @@ async def generate_signature_keys(
 
 @app.post("/auth/register-client-public-key")
 async def register_client_public_key(
-    public_key: str,
-    authorization: Optional[str] = Header(None)
+    authorization: Optional[str] = Header(None),
+    x_public_key: Optional[str] = Header(None, alias="X-Public-Key")
 ):
     """
     Register user's public key (CLIENT-SIDE FILE METHOD).
@@ -565,12 +578,18 @@ async def register_client_public_key(
     Private key never touches server.
     
     Args:
-        public_key: Base64-encoded Ed25519 public key
         authorization: JWT token
+        x_public_key: Base64-encoded Ed25519 public key (via X-Public-Key header)
     
     Returns:
         Success message
     """
+    # Security: public_key now comes from header, not query param
+    if not x_public_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Public-Key header is required"
+        )
     # Extract user ID from token
     user_id = extract_owner_id_from_token(authorization)
     
@@ -586,7 +605,7 @@ async def register_client_public_key(
         # Save only public key to database (client_file method)
         await update_user_signature_keys(
             user_id=user_id,
-            public_key=public_key,
+            public_key=x_public_key,
             encrypted_private_key=None,  # No private key stored
             algorithm='ed25519',
             storage_method='client_file'
@@ -667,8 +686,8 @@ async def verify_file_integrity(
     if not metadata:
         raise HTTPException(404, "File not found")
     
-    # Check permissions (owner or admin)
-    if metadata['owner_id'] != user_id and role != 'admin':
+    # Check permissions (owner, admin, or manager)
+    if metadata['owner_id'] != user_id and role not in ['admin', 'manager']:
         raise HTTPException(403, "Access denied")
     
     total_chunks = metadata['total_chunks']
@@ -808,9 +827,9 @@ async def verify_file_integrity(
 @app.post("/upload")
 async def upload_file(
     classification: str = Query("public", regex="^(top_secret|mission_logs|public)$"),
-    vault_password: Optional[str] = Query(None),  # NEW: For loading signature key
     file: UploadFile = File(...),
-    authorization: Optional[str] = Header(None)
+    authorization: Optional[str] = Header(None),
+    x_vault_password: Optional[str] = Header(None, alias="X-Vault-Password")  # Secure: via header, not query param
 ):
     """
     Secure file upload endpoint with streaming, encryption, and sharding.
@@ -829,15 +848,15 @@ async def upload_file(
     # Step 1: Extract owner_id from JWT
     owner_id = extract_owner_id_from_token(authorization)
     
-    # NEW: Load user's private signing key if vault_password provided
+    # Load user's private signing key if X-Vault-Password header provided
     private_key = None
     user = await get_user_by_id(owner_id)
     
-    if vault_password and user.get('signature_private_key_encrypted'):
+    if x_vault_password and user.get('signature_private_key_encrypted'):
         try:
             private_key = load_user_private_key(
                 user['signature_private_key_encrypted'],
-                vault_password
+                x_vault_password
             )
             print(f"✅ Loaded signature key for user {owner_id}")
         except Exception as e:

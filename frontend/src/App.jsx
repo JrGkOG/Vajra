@@ -9,6 +9,7 @@ import { FilesPage } from './features/files/FilesPage';
 import { LogsPage } from './features/logs/LogsPage';
 import { KeysPage } from './features/keys/KeysPage';
 import { GenerateKeysPage } from './features/keys/GenerateKeysPage';
+import { DocsPage } from './features/docs/DocsPage';
 import { Navigation } from './components/Navigation';
 import { Footer } from './components/Footer';
 
@@ -57,6 +58,9 @@ function App() {
               <Login onLogin={handleLogin} />
           }
         />
+
+        {/* Public Documentation Route */}
+        <Route path="/docs" element={<DocsPage />} />
 
         {/* Protected Routes */}
         <Route

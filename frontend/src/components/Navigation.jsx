@@ -4,8 +4,8 @@ import { Home, Upload, Lock, FileText, LogOut, ShieldCheck, ScrollText } from 'l
 
 export const Navigation = ({ user, onLogout }) => {
     const navLinkClass = ({ isActive }) => `
-        flex items-center gap-2 px-6 py-3 font-mono font-bold border-4 border-black
-        transition-all
+        flex items-center gap-2 px-4 py-3 font-mono font-bold border-4 border-black
+        transition-all whitespace-nowrap
         ${isActive
             ? 'bg-brutal-yellow shadow-hard-sm translate-x-1 translate-y-1'
             : 'bg-white hover:bg-gray-50 shadow-hard hover:shadow-hard-sm hover:translate-x-0.5 hover:translate-y-0.5'
@@ -30,7 +30,7 @@ export const Navigation = ({ user, onLogout }) => {
 
                 {/* Navigation Links */}
                 {user && (
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 flex-wrap">
                         <NavLink to="/home" className={navLinkClass}>
                             <Home size={18} />
                             HOME
@@ -65,7 +65,7 @@ export const Navigation = ({ user, onLogout }) => {
                         {/* Logout Button */}
                         <button
                             onClick={onLogout}
-                            className="flex items-center gap-2 px-6 py-3 font-mono font-bold border-4 border-black bg-brutal-pink text-white hover:bg-pink-600 shadow-hard hover:shadow-hard-sm hover:translate-x-0.5 hover:translate-y-0.5 transition-all"
+                            className="flex items-center gap-2 px-4 py-3 font-mono font-bold border-4 border-black bg-brutal-pink text-white hover:bg-pink-600 shadow-hard hover:shadow-hard-sm hover:translate-x-0.5 hover:translate-y-0.5 transition-all"
                         >
                             <LogOut size={18} />
                             LOGOUT

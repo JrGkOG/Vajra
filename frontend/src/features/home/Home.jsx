@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Rocket, Terminal, Database, Activity, TrendingUp } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { getSystemStatus } from '../../services/api';
@@ -54,14 +55,14 @@ export const Home = ({ token }) => {
                                 <div className="font-mono text-2xl animate-pulse">CHECKING...</div>
                             ) : (
                                 <div className={`transition-all duration-500 ${serverStatus.online
-                                        ? 'animate-bounce'
-                                        : 'grayscale opacity-50'
+                                    ? 'animate-bounce'
+                                    : 'grayscale opacity-50'
                                     }`}>
                                     <Rocket
                                         size={120}
                                         className={`${serverStatus.online
-                                                ? 'text-green-600 stroke-[2.5px]'
-                                                : 'text-red-600 stroke-[2.5px]'
+                                            ? 'text-green-600 stroke-[2.5px]'
+                                            : 'text-red-600 stroke-[2.5px]'
                                             }`}
                                     />
                                     {/* Rocket Flames */}
@@ -172,7 +173,7 @@ export const Home = ({ token }) => {
                                     <div className="flex-1 bg-gray-200 border-4 border-black h-8">
                                         <div
                                             className={`h-full transition-all ${data.uptime === 100 ? 'bg-green-500' :
-                                                    data.uptime > 50 ? 'bg-yellow-500' : 'bg-red-500'
+                                                data.uptime > 50 ? 'bg-yellow-500' : 'bg-red-500'
                                                 }`}
                                             style={{ width: `${data.uptime}%` }}
                                         ></div>
@@ -196,6 +197,25 @@ export const Home = ({ token }) => {
                                 <span>Offline</span>
                             </div>
                         </div>
+                    </Card>
+
+                    {/* Documentation Link */}
+                    <Card className="bg-brutal-blue text-white border-8 border-black p-6">
+                        <div className="flex items-center gap-3 mb-6">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" /></svg>
+                            <h3 className="font-mono font-bold text-xl">DOCUMENTATION</h3>
+                        </div>
+
+                        <p className="font-mono text-sm mb-6 opacity-90">
+                            Learn how VAJRA works, system architecture, user flow, and security features.
+                        </p>
+
+                        <Link
+                            to="/docs"
+                            className="block w-full text-center bg-white text-black font-mono font-bold py-3 px-4 border-4 border-black shadow-hard hover:shadow-hard-sm hover:translate-x-0.5 hover:translate-y-0.5 transition-all"
+                        >
+                            VIEW DOCS →
+                        </Link>
                     </Card>
 
                     {/* Quick Actions */}
