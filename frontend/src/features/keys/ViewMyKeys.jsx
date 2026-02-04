@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Eye, EyeOff, Copy, Key, Shield } from 'lucide-react';
+import { Eye, EyeOff, Copy, Key, Shield, QrCode } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { getMySignatureKeys } from '../../services/api';
+import QRCodeLib from 'qrcode';
 
 export const ViewMyKeys = ({ token }) => {
     const [keys, setKeys] = useState(null);
     const [loading, setLoading] = useState(true);
     const [showPublicKey, setShowPublicKey] = useState(false);
+    const [showQRCode, setShowQRCode] = useState(false);
+    const [qrCodeDataURL, setQrCodeDataURL] = useState('');
     const [copied, setCopied] = useState(false);
 
     useEffect(() => {
@@ -29,6 +32,24 @@ export const ViewMyKeys = ({ token }) => {
         navigator.clipboard.writeText(text);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
+    };
+
+    const generateQRCode = async () => {
+        if (!keys?.public_key) return;
+        try {
+            const dataURL = await QRCodeLib.toDataURL(keys.public_key, {
+                width: 300,
+                margin: 2,
+                color: {
+                    dark: '#000000',
+                    light: '#FFFFFF'
+                }
+            });
+            setQrCodeDataURL(dataURL);
+            setShowQRCode(true);
+        } catch (err) {
+            console.error('Failed to generate QR code:', err);
+        }
     };
 
     if (loading) {
@@ -95,27 +116,54 @@ export const ViewMyKeys = ({ token }) => {
                                 className="py-1 px-2 text-xs"
                             >
                                 {showPublicKey ? <EyeOff size={14} /> : <Eye size={14} />}
-                                {showPublicKey ? ' HIDE' : ' SHOW'}
+                                {showPublicKey ? ' HIDE TEXT' : ' SHOW TEXT'}
                             </Button>
                             <Button
                                 onClick={() => copyToClipboard(keys.public_key)}
                                 className="py-1 px-2 text-xs bg-brutal-blue text-white"
                             >
                                 <Copy size={14} />
-                                {copied ? ' COPIED!' : ' COPY'}
+                                {copied ? ' COPIED!' : ' COPY KEY'}
+                            </Button>
+                            <Button
+                                onClick={() => {
+                                    if (showQRCode) {
+                                        setShowQRCode(false);
+                                    } else {
+                                        generateQRCode();
+                                    }
+                                }}
+                                className="py-1 px-2 text-xs bg-brutal-purple text-white"
+                            >
+                                <QrCode size={14} />
+                                {showQRCode ? ' HIDE QR' : ' SHOW QR'}
                             </Button>
                         </div>
                     </div>
 
+                    {/* Text Display */}
                     {showPublicKey && (
-                        <div className="bg-gray-50 p-3 border border-gray-300 font-mono text-xs break-all">
+                        <div className="bg-gray-50 p-3 border border-gray-300 font-mono text-xs break-all mb-3">
                             {keys.public_key}
                         </div>
                     )}
 
-                    {!showPublicKey && (
+                    {/* QR Code Display */}
+                    {showQRCode && qrCodeDataURL && (
+                        <div className="bg-white p-4 border border-gray-300 text-center">
+                            <img
+                                src={qrCodeDataURL}
+                                alt="Public Key QR Code"
+                                className="mx-auto mb-2"
+                                style={{ width: '300px', height: '300px' }}
+                            />
+                            <p className="text-xs text-gray-600 font-mono">Scan this QR code to get the public key</p>
+                        </div>
+                    )}
+
+                    {!showPublicKey && !showQRCode && (
                         <div className="bg-gray-100 p-3 text-center text-gray-500 text-sm font-mono">
-                            Click "SHOW" to reveal public key
+                            Click "SHOW TEXT" to view the public key or "SHOW QR" to display as QR code
                         </div>
                     )}
                 </div>
