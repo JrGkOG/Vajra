@@ -17,12 +17,18 @@ import json
 from crypto_utils import generate_encryption_key, generate_iv, encrypt_chunk, decrypt_chunk
 from storage_service import upload_chunk_to_supabase, save_file_metadata, get_file_metadata, download_chunk_from_supabase, log_audit_event, list_files
 from vault_service import encrypt_key_for_vault, decrypt_key_from_vault
+from signature_utils import (
+    generate_user_signature_keys, load_user_private_key,
+    sign_chunk_hash, sign_file_manifest, verify_chunk_signature,
+    verify_file_manifest_signature, deserialize_public_key
+)
 
 # Import authentication and MFA services
 from auth_service import (
     get_user_by_email, create_user, update_last_login,
     log_activity, get_activity_logs, check_permission,
-    list_all_users, get_user_permissions, verify_password, get_user_by_id
+    list_all_users, get_user_permissions, verify_password, get_user_by_id,
+    update_user_signature_keys, get_user_signature_public_key
 )
 from email_verification import send_verification_email, verify_user_code
 
@@ -486,9 +492,323 @@ async def get_files(authorization: Optional[str] = Header(None)):
         )
 
 
+@app.post("/auth/generate-signature-keys")
+async def generate_signature_keys(
+    vault_password: str,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Generate Ed25519 signature key pair for authenticated user (PASSWORD METHOD).
+    Private key is encrypted with vault password before storage.
+    
+    Args:
+        vault_password: User's vault password (for encrypting private key)
+        authorization: JWT token
+    
+    Returns:
+        Success message with public key
+    """
+    # Extract user ID from token
+    user_id = extract_owner_id_from_token(authorization)
+    
+    # Get user
+    user = await get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    try:
+        # Generate keys
+        public_key_b64, encrypted_private_b64 = generate_user_signature_keys(vault_password)
+        
+        # Save to database (password method)
+        await update_user_signature_keys(
+            user_id=user_id,
+            public_key=public_key_b64,
+            encrypted_private_key=encrypted_private_b64,
+            algorithm='ed25519',
+            storage_method='password'
+        )
+        
+        # Log activity
+        await log_activity(
+            user_id=user_id,
+            action='SIGNATURE_KEYS_GENERATED',
+            details={'algorithm': 'ed25519', 'method': 'password'}
+        )
+        
+        return {
+            "success": True,
+            "message": "Signature keys generated successfully",
+            "public_key": public_key_b64,
+            "algorithm": "ed25519",
+            "storage_method": "password"
+        }
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate keys: {str(e)}"
+        )
+
+
+@app.post("/auth/register-client-public-key")
+async def register_client_public_key(
+    public_key: str,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Register user's public key (CLIENT-SIDE FILE METHOD).
+    User generates keys in browser and provides public key only.
+    Private key never touches server.
+    
+    Args:
+        public_key: Base64-encoded Ed25519 public key
+        authorization: JWT token
+    
+    Returns:
+        Success message
+    """
+    # Extract user ID from token
+    user_id = extract_owner_id_from_token(authorization)
+    
+    # Get user
+    user = await get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    try:
+        # Save only public key to database (client_file method)
+        await update_user_signature_keys(
+            user_id=user_id,
+            public_key=public_key,
+            encrypted_private_key=None,  # No private key stored
+            algorithm='ed25519',
+            storage_method='client_file'
+        )
+        
+        # Log activity
+        await log_activity(
+            user_id=user_id,
+            action='SIGNATURE_KEYS_GENERATED',
+            details={'algorithm': 'ed25519', 'method': 'client_file'}
+        )
+        
+        return {
+            "success": True,
+            "message": "Public key registered successfully. Private key is managed by you.",
+            "algorithm": "ed25519",
+            "storage_method": "client_file"
+        }
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to register public key: {str(e)}"
+        )
+
+
+@app.get("/auth/my-signature-keys")
+async def get_my_signature_keys(authorization: Optional[str] = Header(None)):
+    """
+    Get current user's signature keys.
+    
+    Returns:
+        public_key: Base64-encoded public key
+        has_private_key: Whether private key is stored (password method)
+        storage_method: 'password' or 'client_file'
+        algorithm: 'ed25519'
+    """
+    user_id = extract_owner_id_from_token(authorization)
+    user = await get_user_by_id(user_id)
+    
+    if not user:
+        raise HTTPException(404, "User not found")
+    
+    public_key = user.get('signature_public_key')
+    encrypted_private = user.get('signature_private_key_encrypted')
+    storage_method = user.get('key_storage_method', 'password')
+    algorithm = user.get('signature_algorithm', 'ed25519')
+    
+    if not public_key:
+        return {
+            "has_keys": False,
+            "message": "No signature keys generated yet"
+        }
+    
+    return {
+        "has_keys": True,
+        "public_key": public_key,
+        "has_private_key": bool(encrypted_private),
+        "storage_method": storage_method,
+        "algorithm": algorithm,
+        "keys_generated_at": user.get('signature_keys_generated_at')
+    }
+
+
+@app.get("/files/{file_id}/verify-integrity")
+async def verify_file_integrity(
+    file_id: str,
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Verify file integrity without downloading.
+    Checks all chunk hashes and signatures.
+    """
+    user_id, aal, role, status_val = extract_claims_from_token(authorization)
+    
+    # Get file metadata
+    metadata = await get_file_metadata(file_id)
+    if not metadata:
+        raise HTTPException(404, "File not found")
+    
+    # Check permissions (owner or admin)
+    if metadata['owner_id'] != user_id and role != 'admin':
+        raise HTTPException(403, "Access denied")
+    
+    total_chunks = metadata['total_chunks']
+    chunk_hashes_stored = metadata['chunk_hashes']
+    chunk_signatures = metadata.get('chunk_signatures', [])
+    file_signature = metadata.get('file_signature')
+    signed_by = metadata.get('signed_by_user_id')
+    
+    result = {
+        "file_id": file_id,
+        "filename": metadata['filename'],
+        "total_chunks": total_chunks,
+        "is_signed": bool(file_signature and chunk_signatures),
+        "signed_by": signed_by,
+        "checks": []
+    }
+    
+    try:
+        # Check 1: File manifest signature
+        if file_signature:
+            public_key_b64 = await get_user_signature_public_key(signed_by)
+            public_key = deserialize_public_key(public_key_b64)
+            
+            manifest = {
+                "file_id": file_id,
+                "filename": metadata['filename'],
+                "total_chunks": total_chunks,
+                "chunk_hashes": chunk_hashes_stored,
+                "classification": metadata.get('classification', 'public'),
+                "owner_id": metadata['owner_id']
+            }
+            
+            manifest_valid = verify_file_manifest_signature(manifest, file_signature, public_key)
+            result['checks'].append({
+                "type": "file_manifest_signature",
+                "status": "PASS" if manifest_valid else "FAIL",
+                "message": "File manifest signature verified" if manifest_valid else "❌ File manifest signature INVALID"
+            })
+            
+            if not manifest_valid:
+                result['integrity_status'] = "COMPROMISED"
+                result['safe_to_download'] = False
+                return result
+        
+        # Check 2: All chunk hashes and signatures
+        chunk_results = []
+        public_key = None
+        
+        if file_signature and signed_by:
+            public_key_b64 = await get_user_signature_public_key(signed_by)
+            public_key = deserialize_public_key(public_key_b64)
+        
+        for chunk_index in range(total_chunks):
+            try:
+                storage_path = f"{file_id}/chunk_{chunk_index}"
+                b64_encrypted_chunk = await download_chunk_from_supabase(
+                    bucket=STORAGE_BUCKET,
+                    path=storage_path
+                )
+                
+                import hashlib
+                encrypted_bytes = base64.b64decode(b64_encrypted_chunk)
+                calculated_hash = hashlib.sha256(encrypted_bytes).hexdigest()
+                stored_hash = chunk_hashes_stored[chunk_index]
+                
+                hash_match = (calculated_hash == stored_hash)
+                
+                chunk_check = {
+                    "chunk_index": chunk_index,
+                    "hash_match": hash_match
+                }
+                
+                if not hash_match:
+                    chunk_check['error'] = "❌ Hash mismatch - database tampering detected"
+                    chunk_check['status'] = "FAIL"
+                    chunk_results.append(chunk_check)
+                    result['integrity_status'] = "COMPROMISED"
+                    result['safe_to_download'] = False
+                    result['checks'].append({
+                        "type": "chunk_integrity",
+                        "chunks": chunk_results
+                    })
+                    return result
+                
+                # Verify signature if available
+                if chunk_signatures and len(chunk_signatures) > chunk_index and public_key:
+                    sig_valid = verify_chunk_signature(calculated_hash, chunk_signatures[chunk_index], public_key)
+                    chunk_check['signature_valid'] = sig_valid
+                    
+                    if not sig_valid:
+                        chunk_check['error'] = "❌ Signature verification failed"
+                        chunk_check['status'] = "FAIL"
+                        chunk_results.append(chunk_check)
+                        result['integrity_status'] = "COMPROMISED"
+                        result['safe_to_download'] = False
+                        result['checks'].append({
+                            "type": "chunk_integrity",
+                            "chunks": chunk_results
+                        })
+                        return result
+                
+                chunk_check['status'] = "PASS"
+                chunk_results.append(chunk_check)
+                
+            except Exception as e:
+                chunk_results.append({
+                    "chunk_index": chunk_index,
+                    "status": "ERROR",
+                    "error": str(e)
+                })
+                result['integrity_status'] = "ERROR"
+                result['safe_to_download'] = False
+                result['checks'].append({
+                    "type": "chunk_integrity",
+                    "chunks": chunk_results
+                })
+                return result
+        
+        result['checks'].append({
+            "type": "chunk_integrity",
+            "status": "PASS",
+            "message": f"✅ All {total_chunks} chunks verified successfully"
+        })
+        
+        result['integrity_status'] = "VERIFIED"
+        result['safe_to_download'] = True
+        
+        return result
+        
+    except Exception as e:
+        result['integrity_status'] = "ERROR"
+        result['safe_to_download'] = False
+        result['error'] = str(e)
+        return result
+
+
 @app.post("/upload")
 async def upload_file(
     classification: str = Query("public", regex="^(top_secret|mission_logs|public)$"),
+    vault_password: Optional[str] = Query(None),  # NEW: For loading signature key
     file: UploadFile = File(...),
     authorization: Optional[str] = Header(None)
 ):
@@ -509,13 +829,29 @@ async def upload_file(
     # Step 1: Extract owner_id from JWT
     owner_id = extract_owner_id_from_token(authorization)
     
+    # NEW: Load user's private signing key if vault_password provided
+    private_key = None
+    user = await get_user_by_id(owner_id)
+    
+    if vault_password and user.get('signature_private_key_encrypted'):
+        try:
+            private_key = load_user_private_key(
+                user['signature_private_key_encrypted'],
+                vault_password
+            )
+            print(f"✅ Loaded signature key for user {owner_id}")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not load signature key: {e}")
+            # Continue without signatures (optional feature)
+    
     # Step 2: Generate encryption materials
     encryption_key = generate_encryption_key()  # 32 bytes for AES-256
     iv = generate_iv()  # 12 bytes for AES-GCM
     file_id = str(uuid.uuid4())
     
-    # Storage for chunk hashes (for integrity verification)
+    # Storage for chunk hashes and signatures (for integrity verification)
     chunk_hashes = []
+    chunk_signatures = []  # NEW: Store signatures
     chunk_index = 0
     
     # For tracking upload tasks
@@ -534,6 +870,11 @@ async def upload_file(
             # Step 4: Encrypt, hash, and encode the chunk
             b64_encrypted_chunk, chunk_hash = encrypt_chunk(chunk_data, encryption_key, iv)
             chunk_hashes.append(chunk_hash)
+            
+            # NEW: Sign the chunk hash if private key available
+            if private_key:
+                chunk_signature = sign_chunk_hash(chunk_hash, private_key)
+                chunk_signatures.append(chunk_signature)
             
             # Step 5: Async upload to Supabase Storage
             # Path format: /uploads/{file_id}/chunk_{index}
@@ -562,6 +903,24 @@ async def upload_file(
                     detail=f"Upload failed at chunk {idx}: {str(result)}"
                 )
         
+        # NEW: Generate file manifest signature if private key available
+        file_signature = None
+        if private_key:
+            manifest = {
+                "file_id": file_id,
+                "filename": file.filename,
+                "total_chunks": chunk_index,
+                "chunk_hashes": chunk_hashes,
+                "classification": classification,
+                "owner_id": owner_id
+            }
+            file_signature = sign_file_manifest(manifest, private_key)
+            print(f"✅ File manifest signed")
+        
+        # Clear private key from memory
+        if private_key:
+            del private_key
+        
         # Step 6: Save metadata to database
         metadata = {
             "file_id": file_id,
@@ -570,7 +929,12 @@ async def upload_file(
             "classification": classification,  # Added classification
             "total_chunks": chunk_index,
             "encryption_iv": base64.b64encode(iv).decode('utf-8'),
-            "chunk_hashes": chunk_hashes
+            "chunk_hashes": chunk_hashes,
+            # NEW: Add signature fields
+            "chunk_signatures": chunk_signatures if chunk_signatures else None,
+            "file_signature": file_signature,
+            "signature_algorithm": "ed25519" if file_signature else None,
+            "signed_by_user_id": owner_id if file_signature else None
         }
         
         await save_file_metadata(metadata)
@@ -708,6 +1072,73 @@ async def download_file(
         }
     })
 
+    # NEW: Verify file signature if present
+    if metadata.get('file_signature'):
+        try:
+            # Get signer's public key
+            signed_by_user_id = metadata.get('signed_by_user_id')
+            if not signed_by_user_id:
+                raise Exception("File has signature but no signer ID")
+            
+            public_key_b64 = await get_user_signature_public_key(signed_by_user_id)
+            public_key = deserialize_public_key(public_key_b64)
+            
+            # Reconstruct manifest
+            manifest = {
+                "file_id": metadata['file_id'],
+                "filename": metadata['filename'],
+                "total_chunks": metadata['total_chunks'],
+                "chunk_hashes": metadata['chunk_hashes'],
+                "classification": metadata.get('classification', 'public'),
+                "owner_id": metadata['owner_id']
+            }
+            
+            # Verify file manifest signature
+            if not verify_file_manifest_signature(
+                manifest,
+                metadata['file_signature'],
+                public_key
+            ):
+                # Log critical security incident
+                await log_audit_event({
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "user_id": user_id,
+                    "action": "SIGNATURE_VERIFICATION_FAILED",
+                    "resource_id": file_id,
+                    "details": {
+                        "type": "file_manifest",
+                        "signed_by": signed_by_user_id,
+                        "severity": "CRITICAL"
+                    }
+                })
+                
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="File integrity check failed - signature verification failed"
+                )
+            
+            print(f"✅ File manifest signature verified for {file_id}")
+        
+        except HTTPException:
+            raise  # Re-raise HTTP exceptions
+        except Exception as e:
+            # Log signature verification error
+            await log_audit_event({
+                "timestamp": datetime.utcnow().isoformat(),
+                "user_id": user_id,
+                "action": "SIGNATURE_VERIFICATION_ERROR",
+                "resource_id": file_id,
+                "details": {
+                    "error": str(e),
+                    "severity": "HIGH"
+                }
+            })
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Signature verification error: {str(e)}"
+            )
+
     
     # Step 5: Decode encryption key and IV
     try:
@@ -722,10 +1153,22 @@ async def download_file(
         )
     
     # Step 6: Create streaming generator
+    # NEW: Get public key if signatures present
+    public_key = None
+    chunk_signatures = metadata.get('chunk_signatures')
+    if chunk_signatures:
+        try:
+            signed_by_user_id = metadata.get('signed_by_user_id')
+            public_key_b64 = await get_user_signature_public_key(signed_by_user_id)
+            public_key = deserialize_public_key(public_key_b64)
+        except Exception as e:
+            print(f"⚠️ Could not load public key for chunk verification: {e}")
+    
     async def chunk_generator():
         """
         Generator function for streaming reassembly.
         Downloads, decodes, and decrypts chunks one by one.
+        NOW WITH SIGNATURE VERIFICATION.
         """
         total_chunks = metadata['total_chunks']
         
@@ -737,6 +1180,87 @@ async def download_file(
                 path=storage_path
             )
             
+            # NEW: Verify chunk signature before decrypting
+            if chunk_signatures and public_key:
+                import hashlib
+                
+                # Calculate hash of encrypted chunk
+                encrypted_bytes = base64.b64decode(b64_encrypted_chunk)
+                chunk_hash = hashlib.sha256(encrypted_bytes).hexdigest()
+                
+                # CRITICAL: First verify hash matches stored hash (catches database tampering)
+                stored_hash = metadata['chunk_hashes'][chunk_index]
+                if chunk_hash != stored_hash:
+                    # Log critical security incident - database tampering detected!
+                    await log_audit_event({
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "user_id": user_id,
+                        "action": "CHUNK_HASH_MISMATCH",
+                        "resource_id": file_id,
+                        "details": {
+                            "chunk_index": chunk_index,
+                            "calculated_hash": chunk_hash,
+                            "stored_hash": stored_hash,
+                            "severity": "CRITICAL",
+                            "attack_type": "DATABASE_TAMPERING"
+                        }
+                    })
+                    
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Chunk {chunk_index} hash mismatch - database tampering detected!"
+                    )
+                
+                # Then verify signature (catches storage tampering)
+                chunk_sig = chunk_signatures[chunk_index]
+                if not verify_chunk_signature(chunk_hash, chunk_sig, public_key):
+                    # Log critical security incident
+                    await log_audit_event({
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "user_id": user_id,
+                        "action": "CHUNK_SIGNATURE_VERIFICATION_FAILED",
+                        "resource_id": file_id,
+                        "details": {
+                            "chunk_index": chunk_index,
+                            "signed_by": signed_by_user_id,
+                            "severity": "CRITICAL",
+                            "attack_type": "STORAGE_TAMPERING"
+                        }
+                    })
+                    
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Chunk {chunk_index} integrity check failed - signature verification failed"
+                    )
+            else:
+                # Even without signatures, verify hash matches stored hash
+                import hashlib
+                encrypted_bytes = base64.b64decode(b64_encrypted_chunk)
+                chunk_hash = hashlib.sha256(encrypted_bytes).hexdigest()
+                stored_hash = metadata['chunk_hashes'][chunk_index]
+                
+                if chunk_hash != stored_hash:
+                    # Log critical security incident
+                    await log_audit_event({
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "user_id": user_id,
+                        "action": "CHUNK_HASH_MISMATCH",
+                        "resource_id": file_id,
+                        "details": {
+                            "chunk_index": chunk_index,
+                            "calculated_hash": chunk_hash,
+                            "stored_hash": stored_hash,
+                            "severity": "CRITICAL",
+                            "attack_type": "DATABASE_TAMPERING",
+                            "note": "File not signed, but hash mismatch detected"
+                        }
+                    })
+                    
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Chunk {chunk_index} hash mismatch - database tampering detected!"
+                    )
+            
             # Decrypt the chunk
             decrypted_chunk = decrypt_chunk(
                 b64_encrypted_chunk,
@@ -747,7 +1271,7 @@ async def download_file(
             # Yield decrypted chunk
             yield decrypted_chunk
     
-    # Step 7: Return streaming response
+    # Step 8: Return streaming response
     filename = metadata['filename']
     
     try:
@@ -1671,3 +2195,80 @@ async def get_my_permissions(authorization: Optional[str] = Header(None)):
         },
         "permissions": permissions
     }
+
+
+@app.get("/admin/logs")
+async def get_admin_logs(
+    limit: int = Query(100, ge=1, le=500),
+    action_filter: Optional[str] = Query(None),
+    user_id_filter: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None)
+):
+    """
+    Get activity logs (admin only).
+    
+    Args:
+        limit: Maximum number of logs to return (1-500)
+        action_filter: Filter by action type
+        user_id_filter: Filter by specific user ID
+        authorization: JWT token
+    
+    Returns:
+        List of activity log entries with user details
+    """
+    # Extract user ID from token
+    user_id = extract_owner_id_from_token(authorization)
+    
+    # Fetch user to check role
+    user = await get_user_by_id(user_id)
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Check if user is admin
+    if user['role'] != 'admin':
+        # Log unauthorized access attempt
+        await log_activity(
+            user_id=user_id,
+            action='ADMIN_ACCESS_DENIED',
+            details={'attempted_endpoint': '/admin/logs', 'role': user['role']}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    
+    # Fetch logs
+    try:
+        logs = await get_activity_logs(
+            user_id=user_id_filter,
+            limit=limit,
+            action_filter=action_filter
+        )
+        
+        # Log admin log access
+        await log_activity(
+            user_id=user_id,
+            action='ADMIN_LOGS_VIEWED',
+            details={
+                'limit': limit,
+                'action_filter': action_filter,
+                'user_id_filter': user_id_filter
+            }
+        )
+        
+        return {
+            "success": True,
+            "logs": logs,
+            "total": len(logs)
+        }
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch logs: {str(e)}"
+        )
+
