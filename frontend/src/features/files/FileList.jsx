@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Download, Lock, RefreshCw, Key } from 'lucide-react';
+import { Download, Lock, RefreshCw, Key, Shield, CheckCircle, XCircle } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
-import { getFiles, downloadFile, listVaultKeys } from '../../services/api';
+import { getFiles, downloadFile, listVaultKeys, verifyFileIntegrity } from '../../services/api';
 import { VaultDialog } from '../vault/VaultDialog';
 
 const ClassificationBadge = ({ level }) => {
@@ -18,6 +18,26 @@ const ClassificationBadge = ({ level }) => {
     );
 };
 
+const SignatureBadge = ({ file }) => {
+    const isSigned = file.file_signature && file.chunk_signatures && file.chunk_signatures.length > 0;
+
+    if (isSigned) {
+        return (
+            <div className="flex items-center gap-1" title={`Signed by ${file.signed_by_user_id || 'unknown'}`}>
+                <span className="text-green-600 font-bold">✓</span>
+                <span className="text-xs">SIGNED</span>
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex items-center gap-1">
+            <span className="text-gray-400">⚠</span>
+            <span className="text-xs text-gray-500">UNSIGNED</span>
+        </div>
+    );
+};
+
 export const FileList = ({ token }) => {
     const [files, setFiles] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -26,6 +46,8 @@ export const FileList = ({ token }) => {
     const [showVaultDialog, setShowVaultDialog] = useState(false);
     const [vaultKeys, setVaultKeys] = useState([]);
     const [currentFileForDownload, setCurrentFileForDownload] = useState(null);
+    const [integrityResult, setIntegrityResult] = useState(null);
+    const [checkingIntegrity, setCheckingIntegrity] = useState(null);
 
     const fetchFiles = async () => {
         if (!token) return;
@@ -114,6 +136,23 @@ export const FileList = ({ token }) => {
         }
     };
 
+    const handleCheckIntegrity = async (file) => {
+        setCheckingIntegrity(file.file_id);
+        setIntegrityResult(null);
+
+        try {
+            const result = await verifyFileIntegrity(file.file_id, token);
+            setIntegrityResult(result);
+        } catch (err) {
+            setIntegrityResult({
+                integrity_status: 'ERROR',
+                error: err.message
+            });
+        } finally {
+            setCheckingIntegrity(null);
+        }
+    };
+
     if (loading) {
         return (
             <div className="text-center p-12 font-mono">
@@ -153,6 +192,7 @@ export const FileList = ({ token }) => {
                             <tr>
                                 <th className="p-4 border-r-4 border-black">FILENAME</th>
                                 <th className="p-4 border-r-4 border-black">CLASS</th>
+                                <th className="p-4 border-r-4 border-black">SIGNATURE</th>
                                 <th className="p-4 border-r-4 border-black">CHUNKS</th>
                                 <th className="p-4 border-r-4 border-black">OWNER</th>
                                 <th className="p-4">ACTION</th>
@@ -167,10 +207,22 @@ export const FileList = ({ token }) => {
                                     <td className="p-4 border-r-4 border-black">
                                         <ClassificationBadge level={file.classification || 'public'} />
                                     </td>
+                                    <td className="p-4 border-r-4 border-black">
+                                        <SignatureBadge file={file} />
+                                    </td>
                                     <td className="p-4 border-r-4 border-black text-sm">{file.total_chunks}</td>
                                     <td className="p-4 border-r-4 border-black text-sm">{file.owner_id}</td>
                                     <td className="p-4">
                                         <div className="flex gap-2">
+                                            <Button
+                                                onClick={() => handleCheckIntegrity(file)}
+                                                disabled={checkingIntegrity === file.file_id}
+                                                className="py-1 px-3 text-xs flex items-center gap-1 bg-green-500 text-white hover:bg-green-600 border-4 border-black"
+                                                title="Verify file integrity"
+                                            >
+                                                <Shield size={14} />
+                                                {checkingIntegrity === file.file_id ? 'CHECKING...' : 'CHECK'}
+                                            </Button>
                                             <Button
                                                 onClick={() => handleVaultDownload(file)}
                                                 disabled={downloadingId === file.file_id}
@@ -207,6 +259,92 @@ export const FileList = ({ token }) => {
                     vaultKeys={vaultKeys}
                     token={token}
                 />
+            )}
+
+            {/* Integrity Check Result Modal */}
+            {integrityResult && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white border-4 border-black shadow-hard max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+                        <div className="p-6">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-xl font-mono font-bold">
+                                    🔒 INTEGRITY CHECK RESULTS
+                                </h3>
+                                <button
+                                    onClick={() => setIntegrityResult(null)}
+                                    className="text-2xl font-bold hover:bg-gray-100 px-2"
+                                >
+                                    ×
+                                </button>
+                            </div>
+
+                            <div className="space-y-4">
+                                {/* Overall Status */}
+                                <div className={`border-4 p-4 font-mono ${integrityResult.integrity_status === 'VERIFIED'
+                                        ? 'border-green-600 bg-green-50'
+                                        : integrityResult.integrity_status === 'COMPROMISED'
+                                            ? 'border-red-600 bg-red-50'
+                                            : 'border-yellow-600 bg-yellow-50'
+                                    }`}>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        {integrityResult.integrity_status === 'VERIFIED' ? (
+                                            <CheckCircle className="text-green-600" size={24} />
+                                        ) : (
+                                            <XCircle className="text-red-600" size={24} />
+                                        )}
+                                        <span className="font-bold text-lg">
+                                            {integrityResult.integrity_status}
+                                        </span>
+                                    </div>
+                                    <div className="text-sm">
+                                        <div>File: {integrityResult.filename}</div>
+                                        <div>Chunks: {integrityResult.total_chunks}</div>
+                                        <div>Signed: {integrityResult.is_signed ? 'YES' : 'NO'}</div>
+                                        {integrityResult.signed_by && (
+                                            <div>Signed by: {integrityResult.signed_by}</div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Checks */}
+                                {integrityResult.checks?.map((check, idx) => (
+                                    <div key={idx} className="border-2 border-black p-3">
+                                        <div className="font-bold mb-2">{check.type.toUpperCase().replace('_', ' ')}</div>
+                                        <div className="text-sm">
+                                            {check.status && (
+                                                <div className={check.status === 'PASS' ? 'text-green-600' : 'text-red-600'}>
+                                                    {check.status}: {check.message}
+                                                </div>
+                                            )}
+                                            {check.chunks && (
+                                                <div className="mt-2">
+                                                    {check.chunks.slice(0, 5).map((chunk, cidx) => (
+                                                        <div key={cidx} className="text-xs mb-1">
+                                                            Chunk {chunk.chunk_index}:
+                                                            {chunk.status === 'PASS' ? ' ✅ OK' : ` ❌ ${chunk.error}`}
+                                                        </div>
+                                                    ))}
+                                                    {check.chunks.length > 5 && (
+                                                        <div className="text-xs">+ {check.chunks.length - 5} more chunks</div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+
+                                {/* Safe to Download */}
+                                <div className="text-center font-mono font-bold text-lg">
+                                    {integrityResult.safe_to_download ? (
+                                        <div className="text-green-600">✅ SAFE TO DOWNLOAD</div>
+                                    ) : (
+                                        <div className="text-red-600">🚫 DO NOT DOWNLOAD - COMPROMISED</div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );
