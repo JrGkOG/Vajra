@@ -1,8 +1,16 @@
 import React, { useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Welcome } from './features/welcome/Welcome';
 import { Login } from './features/auth/Login';
-import { Dashboard } from './features/files/Dashboard';
+import { Home } from './features/home/Home';
+import { UploadPage } from './features/upload/UploadPage';
+import { VaultPage } from './features/vault/VaultPage';
+import { FilesPage } from './features/files/FilesPage';
+import { LogsPage } from './features/logs/LogsPage';
+import { KeysPage } from './features/keys/KeysPage';
+import { GenerateKeysPage } from './features/keys/GenerateKeysPage';
+import { Navigation } from './components/Navigation';
+import { Footer } from './components/Footer';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -18,34 +26,101 @@ function App() {
     setToken(null);
   };
 
+  // Protected route wrapper
+  const ProtectedRoute = ({ children }) => {
+    if (!user) {
+      return <Navigate to="/login" replace />;
+    }
+    return (
+      <>
+        <Navigation user={user} onLogout={handleLogout} />
+        <div className="flex flex-col min-h-screen">
+          <div className="flex-1">
+            {children}
+          </div>
+          <Footer />
+        </div>
+      </>
+    );
+  };
+
   return (
     <Router>
       <Routes>
-        {/* Home/Welcome Page */}
+        {/* Public Routes */}
         <Route path="/" element={<Welcome />} />
-
-        {/* Login Route */}
         <Route
           path="/login"
           element={
             user ?
-              <Navigate to="/dashboard" replace /> :
+              <Navigate to="/home" replace /> :
               <Login onLogin={handleLogin} />
           }
         />
 
-        {/* Dashboard Route - Protected */}
+        {/* Protected Routes */}
         <Route
-          path="/dashboard"
+          path="/home"
           element={
-            user ?
-              <Dashboard user={user} token={token} onLogout={handleLogout} /> :
-              <Navigate to="/login" replace />
+            <ProtectedRoute>
+              <Home token={token} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/upload"
+          element={
+            <ProtectedRoute>
+              <UploadPage token={token} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/vault"
+          element={
+            <ProtectedRoute>
+              <VaultPage token={token} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/files"
+          element={
+            <ProtectedRoute>
+              <FilesPage token={token} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/keys"
+          element={
+            <ProtectedRoute>
+              <KeysPage token={token} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/generate-keys"
+          element={
+            <ProtectedRoute>
+              <GenerateKeysPage token={token} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/logs"
+          element={
+            <ProtectedRoute>
+              <LogsPage token={token} user={user} />
+            </ProtectedRoute>
           }
         />
 
-        {/* Catch all - redirect to home */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* Legacy redirect for old dashboard route */}
+        <Route path="/dashboard" element={<Navigate to="/home" replace />} />
+
+        {/* Catch all - redirect to home or welcome */}
+        <Route path="*" element={<Navigate to={user ? "/home" : "/"} replace />} />
       </Routes>
     </Router>
   );
