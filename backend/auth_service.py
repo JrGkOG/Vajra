@@ -270,3 +270,65 @@ def get_user_permissions(user: Dict) -> Dict:
     base_permissions['can_download'] = user.get('can_download', base_permissions['can_download'])
     
     return base_permissions
+
+
+async def update_user_signature_keys(user_id: str, public_key: str, 
+                                     encrypted_private_key: str = None, 
+                                     algorithm: str = 'ed25519',
+                                     storage_method: str = 'password'):
+    """
+    Update user's signature keys in database.
+    
+    Args:
+        user_id: User ID
+        public_key: Base64-encoded public key
+        encrypted_private_key: Encrypted private key (None for client_file method)
+        algorithm: Signature algorithm ('ed25519')
+        storage_method: 'password' or 'client_file'
+    """
+    try:
+        from datetime import datetime
+        supabase.table('users').update({
+            'signature_public_key': public_key,
+            'signature_private_key_encrypted': encrypted_private_key,
+            'signature_algorithm': algorithm,
+            'key_storage_method': storage_method,
+            'signature_keys_generated_at': datetime.utcnow().isoformat()
+        }).eq('user_id', user_id).execute()
+        
+        print(f"✅ Signature keys updated for user {user_id}")
+    except Exception as e:
+        print(f"❌ Error updating signature keys: {e}")
+        raise Exception(f"Failed to update signature keys: {str(e)}")
+
+
+async def get_user_signature_public_key(user_id: str) -> str:
+    """
+    Get user's public signature key.
+    
+    Args:
+        user_id: User ID
+    
+    Returns:
+        Base64-encoded public key
+    
+    Raises:
+        Exception: If user not found or no keys generated
+    """
+    try:
+        response = supabase.table('users').select('signature_public_key').eq('user_id', user_id).execute()
+        
+        if not response.data or len(response.data) == 0:
+            raise Exception(f"User {user_id} not found")
+        
+        public_key = response.data[0].get('signature_public_key')
+        
+        if not public_key:
+            raise Exception(f"User {user_id} has not generated signature keys yet")
+        
+        return public_key
+    
+    except Exception as e:
+        print(f"❌ Error fetching public key: {e}")
+        raise
+
