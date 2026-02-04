@@ -77,11 +77,17 @@ export async function login(username, password) {
  * @param {string} token - JWT token
  * @returns {Promise<object>}
  */
-export async function uploadFile(file, classification, token) {
+export async function uploadFile(file, classification, token, vaultPassword = null) {
     const formData = new FormData();
     formData.append('file', file);
 
-    const response = await fetch(`${API_BASE_URL}/upload?classification=${classification}`, {
+    // Build URL with classification and optional vault_password for signing
+    let url = `${API_BASE_URL}/upload?classification=${classification}`;
+    if (vaultPassword) {
+        url += `&vault_password=${encodeURIComponent(vaultPassword)}`;
+    }
+
+    const response = await fetch(url, {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${token}`
@@ -262,6 +268,151 @@ export async function deleteVaultKey(vaultId, token) {
     if (!response.ok) {
         const error = await response.json();
         throw new Error(error.detail || 'Failed to delete vault key');
+    }
+
+    return await response.json();
+}
+
+// ===== SYSTEM STATUS API FUNCTIONS =====
+
+/**
+ * Get system status and metrics
+ * @param {string} token - JWT token
+ * NOTE: This is currently mocked data. Replace with real backend endpoint when available.
+ */
+export async function getSystemStatus(token) {
+    // Try to check if backend is actually online
+    try {
+        const response = await fetch(`${API_BASE_URL}/files`, {
+            method: 'HEAD',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        // If backend responds, return mock metrics
+        // TODO: Replace with GET /system/status endpoint
+        return {
+            totalFiles: 42,
+            totalStorage: '128.5 MB',
+            uptime: '48h 32m',
+            lastCheck: new Date().toISOString()
+        };
+    } catch (error) {
+        // Backend is offline
+        throw new Error('Backend offline');
+    }
+}
+
+/**
+ * Get activity logs (admin only)
+ * @param {string} token - JWT token
+ * @param {Object} filters - Optional filters
+ * @param {number} filters.limit - Maximum number of logs
+ * @param {string} filters.action - Filter by action type
+ * @param {string} filters.userId - Filter by user ID
+ */
+export async function getActivityLogs(token, filters = {}) {
+    const params = new URLSearchParams();
+
+    if (filters.limit) params.append('limit', filters.limit);
+    if (filters.action) params.append('action_filter', filters.action);
+    if (filters.userId) params.append('user_id_filter', filters.userId);
+
+    const response = await fetch(`${API_BASE_URL}/admin/logs?${params}`, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${token}`
+        }
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to fetch activity logs');
+    }
+
+    return await response.json();
+}
+
+
+/**
+ * Generate Ed25519 signature keys for user
+ * @param {string} token - JWT token
+ * @param {string} vaultPassword - User's vault password
+ */
+export async function generateSignatureKeys(token, vaultPassword) {
+    const response = await fetch(`${API_BASE_URL}/auth/generate-signature-keys?vault_password=${encodeURIComponent(vaultPassword)}`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${token}`
+        }
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to generate signature keys');
+    }
+
+    return await response.json();
+}
+
+/**
+ * Register client-side generated public key
+ * @param {string} token - JWT token
+ * @param {string} publicKey - Base64-encoded public key
+ */
+export async function registerClientPublicKey(token, publicKey) {
+    const response = await fetch(`${API_BASE_URL}/auth/register-client-public-key?public_key=${encodeURIComponent(publicKey)}`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${token}`
+        }
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to register public key');
+    }
+
+    return await response.json();
+}
+
+/**
+ * Get current user's signature keys
+ * @param {string} token - JWT token
+ */
+export async function getMySignatureKeys(token) {
+    const response = await fetch(`${API_BASE_URL}/auth/my-signature-keys`, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${token}`
+        }
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to get keys');
+    }
+
+    return await response.json();
+}
+
+/**
+ * Verify file integrity without downloading
+ * @param {string} fileId - File ID
+ * @param {string} token - JWT token
+ */
+export async function verifyFileIntegrity(fileId, token) {
+    const response = await fetch(`${API_BASE_URL}/files/${fileId}/verify-integrity`, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${token}`
+        }
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to verify integrity');
     }
 
     return await response.json();
