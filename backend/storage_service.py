@@ -185,6 +185,16 @@ async def log_audit_event(event: Dict[str, Any]) -> Dict[str, Any]:
         # In a real app, you might want to fire-and-forget this or use a queue
         # so it doesn't block the main request. For PoC, we await it.
         response = supabase.table("audit_logs").insert(event).execute()
+
+        # Mirror into the hash-chained ledger (tamper-evident; head anchored on-chain)
+        from ledger_service import append_entry
+        await append_entry(
+            source="audit_logs",
+            user_id=event.get("user_id"),
+            action=event.get("action"),
+            resource_id=event.get("resource_id"),
+            details=event.get("details"),
+        )
         return {"success": True, "data": response.data}
     except Exception as e:
         # Fail open or closed? For logging, usually fail open (log error but don't stop user)

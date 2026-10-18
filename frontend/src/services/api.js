@@ -466,3 +466,29 @@ export async function verifyFileIntegrity(fileId, token) {
 
     return await response.json();
 }
+
+// ───────────────────────── Blockchain layer ─────────────────────────
+
+async function chainRequest(path, token, method = 'GET') {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+        method,
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!response.ok) {
+        let detail = 'Request failed';
+        try { detail = (await response.json()).detail || detail; } catch { /* non-JSON error */ }
+        throw new Error(detail);
+    }
+    return await response.json();
+}
+
+export const getChainStatus = (token) => chainRequest('/chain/status', token);
+export const getFileAnchor = (fileId, token) => chainRequest(`/chain/files/${fileId}/anchor`, token);
+export const anchorExistingFile = (fileId, token) => chainRequest(`/chain/files/${fileId}/anchor`, token, 'POST');
+export const getChunkProof = (fileId, index, token) => chainRequest(`/chain/files/${fileId}/proof/${index}`, token);
+export const verifyLedger = (token) => chainRequest('/admin/ledger/verify', token);
+export const getLedgerEntries = (token, limit = 25) => chainRequest(`/admin/ledger/entries?limit=${limit}`, token);
+export const anchorLedgerCheckpoint = (token) => chainRequest('/admin/ledger/checkpoint', token, 'POST');
+export const getOracleStatus = (token) => chainRequest('/chain/oracle/status', token);
+export const requestOracleCheck = (fileId, token) => chainRequest(`/chain/files/${fileId}/oracle-check`, token, 'POST');
+export const runOracleSweep = (token) => chainRequest('/admin/oracle/sweep', token, 'POST');

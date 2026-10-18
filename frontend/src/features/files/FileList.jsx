@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Download, Lock, RefreshCw, Key, Shield, CheckCircle, XCircle } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { getFiles, downloadFile, listVaultKeys, verifyFileIntegrity } from '../../services/api';
 import { VaultDialog } from '../vault/VaultDialog';
+import { parseKeyFile } from '../../utils/keyFile';
 
 const ClassificationBadge = ({ level }) => {
     const styles = {
@@ -92,10 +93,41 @@ export const FileList = ({ token }) => {
         fetchVaultKeys();
     }, [token]);
 
-    const handleDownload = async (file) => {
-        const encryptionKey = prompt('Enter encryption key (hex):');
-        if (!encryptionKey) return;
+    // Manual download: the user selects the key file saved at upload time.
+    const keyInputRef = useRef(null);
+    const pendingFileRef = useRef(null);
 
+    const handleDownload = (file) => {
+        pendingFileRef.current = file;
+        if (keyInputRef.current) {
+            keyInputRef.current.value = '';      // allow re-selecting the same file
+            keyInputRef.current.click();
+        }
+    };
+
+    const handleKeyFileChosen = async (e) => {
+        const keyFile = e.target.files && e.target.files[0];
+        const file = pendingFileRef.current;
+        if (!keyFile || !file) return;
+
+        let parsed;
+        try {
+            parsed = parseKeyFile(await keyFile.text());
+        } catch {
+            parsed = null;
+        }
+        if (!parsed) {
+            alert('That file does not contain an encryption key. Select the vajra-key-XXXX.txt saved at upload.');
+            return;
+        }
+        if (parsed.fileId && parsed.fileId !== file.file_id) {
+            alert(`This key file belongs to a different file.\n\nSelected file: ${file.filename}\nKey file is for ID: ${parsed.fileId}`);
+            return;
+        }
+        await runDownload(file, parsed.key);
+    };
+
+    const runDownload = async (file, encryptionKey) => {
         setDownloadingId(file.file_id);
         try {
             const blob = await downloadFile(file.file_id, encryptionKey, token);
@@ -175,6 +207,14 @@ export const FileList = ({ token }) => {
 
     return (
         <div>
+            {/* Hidden picker for manual-mode key files (opened by the DL button) */}
+            <input
+                ref={keyInputRef}
+                type="file"
+                accept=".txt,text/plain"
+                className="hidden"
+                onChange={handleKeyFileChosen}
+            />
             <div className="flex justify-between items-end mb-4">
                 <h3 className="text-xl font-mono font-bold">SECURE VAULT</h3>
                 <div className="flex gap-2 items-center">
@@ -349,8 +389,33 @@ export const FileList = ({ token }) => {
                                         <div className="font-bold mb-2">{check.type.toUpperCase().replace('_', ' ')}</div>
                                         <div className="text-sm">
                                             {check.status && (
-                                                <div className={check.status === 'PASS' ? 'text-green-600' : 'text-red-600'}>
+                                                <div className={
+                                                    check.status === 'PASS' ? 'text-green-600'
+                                                        : check.status === 'WARN' ? 'text-yellow-700'
+                                                            : 'text-red-600'
+                                                }>
                                                     {check.status}: {check.message}
+                                                </div>
+                                            )}
+                                            {check.type === 'blockchain_anchor' && check.anchored && (
+                                                <div className="mt-2 text-xs space-y-1 break-all bg-gray-50 border-2 border-black p-2">
+                                                    <div>Block: #{check.block_number} (chain {check.chain_id})</div>
+                                                    <div>Contract: {check.contract_address}</div>
+                                                    {check.tx_hash && <div>Tx: {check.tx_hash}</div>}
+                                                    <div>On-chain root: {check.on_chain_root}</div>
+                                                    <div>Database root: {check.local_root}</div>
+                                                    {check.oracle && check.oracle.checks > 0 && (
+                                                        <div>
+                                                            Oracle: {check.oracle.status === 'HEALTHY' ? '✅ HEALTHY' : '🚨 COMPROMISED'}
+                                                            {' '}(block #{check.oracle.block_number}, {check.oracle.checks} check
+                                                            {check.oracle.checks === 1 ? '' : 's'})
+                                                        </div>
+                                                    )}
+                                                    <div>
+                                                        Root {check.root_match ? '✅ match' : '❌ MISMATCH'}
+                                                        {' · '}
+                                                        Manifest {check.manifest_match ? '✅ match' : '❌ MISMATCH'}
+                                                    </div>
                                                 </div>
                                             )}
                                             {check.chunks && (

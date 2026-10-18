@@ -1,0 +1,20 @@
+anchoring wallet : 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+oracle wallet    : 0x70997970C51812dc3A010C7d01b50e0d17dc79C8   (authorised on-chain: True)
+anchorFile       : block 3, gas 140156
+
+[1] storage matches anchor    -> oracle report: HEALTHY
+[2] storage tampered          -> oracle report: COMPROMISED
+    verifyFile(real root)     -> COMPROMISED   (contract enforces the finding)
+    TamperAlarm events on-chain: 1
+[3] storage unreachable       -> answered? False   (no false alarm)
+[4] storage restored          -> oracle report: HEALTHY
+    verifyFile(real root)     -> MATCH
+
+on-chain event feed (newest first)
+  block  9  IntegrityReported        HEALTHY
+  block  8  IntegrityCheckRequested  
+  block  7  TamperAlarm              ALARM
+  block  7  IntegrityReported        COMPROMISED
+  block  6  IntegrityCheckRequested  
+  block  5  IntegrityReported        HEALTHY
+  block  4  IntegrityCheckRequested  

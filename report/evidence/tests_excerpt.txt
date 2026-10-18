@@ -1,0 +1,15 @@
+  VajraRegistry oracle (request / callback)
+    [ok] reports its version so a stale deployment can be detected
+    [ok] only the owner manages oracles
+    [ok] request emits an event with an incrementing id
+    [ok] cannot request a check on an unanchored file, or as a stranger
+    [ok] a matching observation is recorded as Healthy
+    [ok] a differing observation raises TamperAlarm and flips verifyFile
+    [ok] a later clean check clears the flag, and history stays in the events
+    [ok] only an oracle can fulfil - not the anchorer, not the owner
+    [ok] a request can be fulfilled once, and unknown ids revert
+    [ok] a de-authorised oracle can no longer report
+  33 passing
+
+Ran 23 tests in 0.020s
+OK

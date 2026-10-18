@@ -22,3 +22,11 @@ backend/downloads/
 *.swo
 commit.sh
 node_modules/
+# Python virtualenv
+.venv/
+backend/.venv/
+
+# Blockchain local state
+backend/chain_journal.jsonl
+backend/chain_node.log
+backend/chain_deployment.json

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Lock, Zap, Database, ArrowRight, BookOpen } from 'lucide-react';
+import { Shield, Lock, Zap, Database, ArrowRight, BookOpen, Link2, AlertTriangle } from 'lucide-react';
 import { Footer } from '../../components/Footer';
 
 export const Welcome = () => {
@@ -71,6 +71,32 @@ export const Welcome = () => {
                                     <h3 className="text-2xl font-black mb-3">IMMUTABLE AUDIT LOGS</h3>
                                     <p className="text-base leading-relaxed">
                                         Every upload, download, and access attempt is cryptographically logged for forensic verification.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Card 5 - Purple */}
+                        <div className="brutal-card bg-brutal-purple text-white">
+                            <div className="flex items-start gap-4 mb-4">
+                                <Link2 size={40} className="stroke-[3px] flex-shrink-0" />
+                                <div>
+                                    <h3 className="text-2xl font-black mb-3">BLOCKCHAIN ANCHORING</h3>
+                                    <p className="text-base leading-relaxed">
+                                        Each file's Merkle root is written to a Solidity smart contract. Tamper with the database and the chain proves it.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Card 6 - Orange */}
+                        <div className="brutal-card bg-brutal-orange text-white">
+                            <div className="flex items-start gap-4 mb-4">
+                                <AlertTriangle size={40} className="stroke-[3px] flex-shrink-0" />
+                                <div>
+                                    <h3 className="text-2xl font-black mb-3">ORACLE TAMPER ALARMS</h3>
+                                    <p className="text-base leading-relaxed">
+                                        An independent oracle inspects real storage and raises a permanent on-chain alarm on any mismatch.
                                     </p>
                                 </div>
                             </div>

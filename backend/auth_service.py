@@ -145,6 +145,16 @@ async def log_activity(user_id: str, action: str, resource_type: str = None,
         
         supabase.table('activity_logs').insert(log_data).execute()
         print(f"📝 Activity logged: {action} by user {user_id}")
+
+        # Mirror into the hash-chained ledger (tamper-evident; head anchored on-chain)
+        from ledger_service import append_entry
+        await append_entry(
+            source='activity_logs',
+            user_id=user_id,
+            action=action,
+            resource_id=resource_id,
+            details=details,
+        )
     except Exception as e:
         print(f"⚠️  Warning: Failed to log activity: {e}")
 

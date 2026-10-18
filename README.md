@@ -100,6 +100,32 @@
 
 ---
 
+## ⛓️ Blockchain Layer
+
+Vajra keeps files and logs in a database, so whoever controls the database could change them unnoticed. The blockchain layer stores only **fingerprints** on an EVM chain the database owner cannot edit.
+
+| Component | What it does |
+|-----------|--------------|
+| `blockchain/contracts/VajraRegistry.sol` | Solidity contract: write-once file anchors, revocation, monotonic ledger checkpoints, on-chain Merkle-proof verification, oracle request/callback, role-based access |
+| `backend/ledger.py` | Merkle tree + hash chain (byte-compatible with the contract) |
+| `backend/chain_service.py` | web3.py bridge: anchor, verify, read verdicts |
+| `backend/chain_oracle.py` | Oracle node: inspects real storage and reports to the contract from a separate wallet |
+| `backend/chain_bootstrap.py` | Starts the node, deploys the contract, replays the journal. Runs automatically with the backend |
+| `backend/chain_journal.py` | Hash-chained record of every anchor, used to rebuild the chain after a restart |
+| `backend/ledger_service.py` | Hash-chained audit ledger (run `backend/create_ledger_table.sql` once) |
+
+**Flow:** upload → Merkle root of all chunk hashes → `anchorFile()` on-chain → CHECK recomputes the root and compares → the oracle re-checks on a schedule and raises a `TamperAlarm` on any mismatch.
+
+**On-chain:** Merkle roots, manifest hashes, hashed file ids, ledger heads, oracle events. **Never on-chain:** files, keys, filenames, classifications, identities.
+
+**Run it:** start the backend and frontend as usual; the backend launches the local chain itself.
+
+**Tests:** `cd blockchain && npx hardhat test` (33) and `cd backend && python -m unittest test_ledger test_chain_journal` (23).
+
+**Known limits:** local in-memory chain rebuilt from the journal on restart; a single oracle (no quorum); files uploaded before this layer must be anchored by an admin.
+
+---
+
 ## 🏗️ Architecture
 
 ```

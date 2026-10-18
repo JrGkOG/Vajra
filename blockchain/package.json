@@ -1,0 +1,17 @@
+{
+  "name": "vajra-blockchain",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Solidity smart contracts anchoring Vajra file integrity and audit-ledger state on an EVM chain",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "node": "hardhat node",
+    "deploy:local": "hardhat run scripts/deploy.js --network localhost",
+    "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.29.1"
+  }
+}

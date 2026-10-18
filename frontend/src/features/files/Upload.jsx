@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { UploadCloud } from 'lucide-react';
 import { uploadFile, storeKeyInVault } from '../../services/api';
 import { Button } from '../../components/ui/Button';
+import { nextKeyNumber, buildKeyFile, keyFileName, downloadTextFile } from '../../utils/keyFile';
 
 export const Upload = ({ token }) => {
     const [isDragging, setIsDragging] = useState(false);
@@ -76,6 +77,17 @@ export const Upload = ({ token }) => {
                 }
             }
 
+            // Manual mode (or vault save failed): hand the user a numbered key file
+            if (!result.savedToVault) {
+                const number = nextKeyNumber();
+                const name = keyFileName(number);
+                const text = buildKeyFile({
+                    number, filename: file.name, fileId: result.file_id, keyHex: result.encryption_key
+                });
+                downloadTextFile(name, text);
+                result.keyFile = { name, text };
+            }
+
             setUploadResult(result);
             setFile(null); // Reset file after successful upload
             setVaultPassword('');
@@ -111,16 +123,15 @@ export const Upload = ({ token }) => {
                     <input
                         type="checkbox"
                         checked={saveToVault}
-                        onChange={(e) => {
-                            setSaveToVault(e.target.checked);
-                            setShowVaultInputs(e.target.checked);
-                        }}
+                        onChange={(e) => setSaveToVault(e.target.checked)}
                         className="w-6 h-6 border-4 border-black"
                     />
                     <span className="font-mono font-bold">🔐 SAVE ENCRYPTION KEY TO VAULT</span>
                 </label>
                 <p className="text-xs font-mono mt-2 ml-9">
-                    Store key securely with password protection. No manual saving required!
+                    {saveToVault
+                        ? 'Store key securely with password protection. No manual saving required!'
+                        : 'Manual mode: a numbered key file (.txt) downloads automatically after upload. Keep it safe — you will select it to download this file.'}
                 </p>
             </div>
 
@@ -211,18 +222,24 @@ export const Upload = ({ token }) => {
                             <p className="font-bold text-xs">🔐 KEY SAVED TO VAULT SECURELY!</p>
                             <p className="text-xs mt-1">You can retrieve it anytime with your vault password + MFA</p>
                         </div>
-                    ) : uploadResult.vaultError ? (
-                        <>
-                            <div className="mt-3 p-2 bg-yellow-50 border-2 border-yellow-600">
-                                <p className="font-bold text-xs mb-1">⚠️ Vault save failed: {uploadResult.vaultError}</p>
-                                <p className="font-bold text-xs mb-1">🔑 ENCRYPTION KEY (SAVE THIS!):</p>
-                                <p className="break-all text-xs">{uploadResult.encryption_key}</p>
-                            </div>
-                        </>
                     ) : (
                         <div className="mt-3 p-2 bg-yellow-50 border-2 border-yellow-600">
-                            <p className="font-bold text-xs mb-1">🔑 ENCRYPTION KEY (SAVE THIS!):</p>
-                            <p className="break-all text-xs">{uploadResult.encryption_key}</p>
+                            {uploadResult.vaultError && (
+                                <p className="font-bold text-xs mb-1">⚠️ Vault save failed: {uploadResult.vaultError}</p>
+                            )}
+                            <p className="font-bold text-xs mb-1">
+                                🔑 KEY FILE DOWNLOADED: {uploadResult.keyFile?.name}
+                            </p>
+                            <p className="text-xs">
+                                Keep it safe. To download this file later, click DL and select this key file.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={() => downloadTextFile(uploadResult.keyFile.name, uploadResult.keyFile.text)}
+                                className="mt-2 text-xs font-bold underline"
+                            >
+                                Didn't download? Save the key file again
+                            </button>
                         </div>
                     )}
                 </div>

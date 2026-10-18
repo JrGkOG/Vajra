@@ -10,6 +10,7 @@ import { LogsPage } from './features/logs/LogsPage';
 import { KeysPage } from './features/keys/KeysPage';
 import { GenerateKeysPage } from './features/keys/GenerateKeysPage';
 import { DocsPage } from './features/docs/DocsPage';
+import { ChainPage } from './features/chain/ChainPage';
 import { Navigation } from './components/Navigation';
 import { Footer } from './components/Footer';
 
@@ -116,6 +117,15 @@ function App() {
           element={
             <ProtectedRoute>
               <LogsPage token={token} user={user} />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/chain"
+          element={
+            <ProtectedRoute>
+              <ChainPage token={token} user={user} />
             </ProtectedRoute>
           }
         />

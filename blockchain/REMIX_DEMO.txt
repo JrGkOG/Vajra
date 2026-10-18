@@ -1,0 +1,206 @@
+
+
+---------------------------------------------------------------------
+ 1. SETUP  (once)
+---------------------------------------------------------------------
+ a) Deploy & Run tab -> ENVIRONMENT = Remix VM.
+ b) Select Account B in the ACCOUNT dropdown, click the COPY icon to copy
+    its address, then switch back to Account A.
+ c) Confirm VajraRegistry is listed under "Deployed Contracts".
+
+ SAY: "The contract is deployed. Account A is the owner. Account B will
+       act as the oracle - a different wallet on purpose."
+
+
+---------------------------------------------------------------------
+ 2. AUTHORISE THE ORACLE            
+---------------------------------------------------------------------
+ Function : setOracle
+ Input    : <paste Account B address>, true
+ Expect   : terminal shows event  OracleSet
+ SAY      : "Only the owner can decide who is allowed to report data."
+
+
+---------------------------------------------------------------------
+ 3. REGISTER THE FILE (ANCHOR)     
+---------------------------------------------------------------------
+ Function : anchorFile
+ Input    : 0x717a211f6474880466723e790bf9d22b06a9f0ac9549f65ec40e0109ec286701, 0x16aeefe2cbc2aa871d43dcb0ca982c879fab08db2ab6cfeab76662b0109c127b, 0xfc826553e72dc285c4bf9cd73cf28080dad899a99303b1900db8373c0dbd05e2, 4
+            (fileId, merkleRoot, manifestHash, totalChunks)
+ Expect   : event  FileAnchored  in the terminal logs
+ Then     : click  totalFiles  (blue)  -> returns 1
+
+
+---------------------------------------------------------------------
+ 4. VERIFY THE FILE                 
+---------------------------------------------------------------------
+ 4a) Genuine root
+ Function : verifyFile
+ Input    : 0x717a211f6474880466723e790bf9d22b06a9f0ac9549f65ec40e0109ec286701, 0x16aeefe2cbc2aa871d43dcb0ca982c879fab08db2ab6cfeab76662b0109c127b
+ Expect   : uint8: 1   (Match)
+
+ 4b) Forged root
+ Function : verifyFile
+ Input    : 0x717a211f6474880466723e790bf9d22b06a9f0ac9549f65ec40e0109ec286701, 0x9e9c3fdcb2a29e11c1f9f4cf72a0fbea30c396feab96de1b0a49443d0828f487
+ Expect   : uint8: 2   (Mismatch)
+ SAY      : "If anyone changes the data, the recomputed root no longer
+             matches the one on the blockchain."
+
+
+---------------------------------------------------------------------
+ 5. WRITE-ONCE RULE                
+---------------------------------------------------------------------
+ Function : anchorFile   (repeat the exact input from step 3)
+ Expect   : RED ERROR  AlreadyAnchored
+ SAY      : "An anchor can never be overwritten, so history can't be
+             quietly replaced."
+
+
+---------------------------------------------------------------------
+ 6. MERKLE PROOF OF ONE CHUNK     
+---------------------------------------------------------------------
+ 6a) Real chunk
+ Function : verifyChunk
+ Input    : 0x717a211f6474880466723e790bf9d22b06a9f0ac9549f65ec40e0109ec286701, 0x87e8ecd1342f3efcc6fd3788545758f87181aa598900dc23adccf975c0bebfb4, 2, ["0xd258765e060fa9e1738e2ee2e716a3cc2a06c4a53dfe5edefe884d7fc68951f4","0x760e5df88911d19141b36d26779a5866f632d9d4e25daf8a8339b3024ec72183"]
+ Expect   : bool: true
+
+ 6b) Fake chunk
+ Function : verifyChunk
+ Input    : 0x717a211f6474880466723e790bf9d22b06a9f0ac9549f65ec40e0109ec286701, 0x1f1cb682bd5416ec7ff4004b75ab6336815284882623b95afc317759fb5d0152, 2, ["0xd258765e060fa9e1738e2ee2e716a3cc2a06c4a53dfe5edefe884d7fc68951f4","0x760e5df88911d19141b36d26779a5866f632d9d4e25daf8a8339b3024ec72183"]
+ Expect   : bool: false
+ SAY      : "Chunk 2 of 4 is proven with only 2 hashes - that is the
+             power of a Merkle tree."
+
+
+---------------------------------------------------------------------
+ 7. ORACLE - HEALTHY CHECK
+---------------------------------------------------------------------
+ 7a) Request                         (as Account A)
+ Function : requestIntegrityCheck
+ Input    : 0x717a211f6474880466723e790bf9d22b06a9f0ac9549f65ec40e0109ec286701
+ Expect   : event  IntegrityCheckRequested ;  requestCount (blue) = 1
+
+ 7b) Oracle answers                  (switch to Account B)
+ Function : fulfillIntegrityCheck
+ Input    : 1, 0x16aeefe2cbc2aa871d43dcb0ca982c879fab08db2ab6cfeab76662b0109c127b
+ Expect   : event  IntegrityReported  (status 1 = Healthy), no alarm
+ SAY      : "The contract asked a question it cannot answer itself. The
+             oracle looked at the real data off-chain and reported back."
+
+
+---------------------------------------------------------------------
+ 8. ORACLE - TAMPERING DETECTED
+---------------------------------------------------------------------
+ 8a) Request again                   (as Account A)
+ Function : requestIntegrityCheck    (same fileId as 7a)  -> request id 2
+
+ 8b) Oracle reports a different root (as Account B)
+ Function : fulfillIntegrityCheck
+ Input    : 2, 0x9e9c3fdcb2a29e11c1f9f4cf72a0fbea30c396feab96de1b0a49443d0828f487
+ Expect   : events  IntegrityReported  AND  TamperAlarm
+
+ 8c) Read the report                 (blue)
+ Function : getIntegrityReport
+ Input    : 0x717a211f6474880466723e790bf9d22b06a9f0ac9549f65ec40e0109ec286701
+ Expect   : status 2 (Compromised), checks 2
+
+ 8d) Contract enforces the finding   (blue)
+ Function : verifyFile  (the GENUINE root from step 4a)
+ Input    : 0x717a211f6474880466723e790bf9d22b06a9f0ac9549f65ec40e0109ec286701, 0x16aeefe2cbc2aa871d43dcb0ca982c879fab08db2ab6cfeab76662b0109c127b
+ Expect   : uint8: 4   (Compromised)
+ SAY      : "The oracle only reports what it saw. The CONTRACT compares it
+             with the anchor, raises the alarm and flags the file."
+
+
+---------------------------------------------------------------------
+ 9. ORACLE - RECOVERY
+---------------------------------------------------------------------
+ 9a) As Account A: requestIntegrityCheck (same fileId)      -> request id 3
+ 9b) As Account B: fulfillIntegrityCheck
+ Input    : 3, 0x16aeefe2cbc2aa871d43dcb0ca982c879fab08db2ab6cfeab76662b0109c127b
+ Expect   : IntegrityReported (Healthy). getIntegrityReport status = 1.
+ SAY      : "The flag clears when the data is correct again - but the
+             TamperAlarm stays in the logs forever."
+
+
+---------------------------------------------------------------------
+ 10. ACCESS CONTROL (negative tests - RED errors are the point)
+---------------------------------------------------------------------
+ a) As Account A  : fulfillIntegrityCheck  with  1, <merkleRoot>
+    Expect: RED ERROR  NotOracle        (the anchorer cannot vouch)
+ b) As Account B  : fulfillIntegrityCheck  with  1, <merkleRoot>
+    Expect: RED ERROR  AlreadyFulfilled (one answer per request)
+ c) As Account B  : anchorFile (any values)
+    Expect: RED ERROR  NotAnchorer      (the oracle cannot write anchors)
+ SAY: "No single wallet can both write a commitment and vouch for it."
+
+
+---------------------------------------------------------------------
+ 11. LEDGER CHECKPOINT              (as Account A)
+---------------------------------------------------------------------
+ Function : anchorCheckpoint
+ Input    : 0x52a68b7af52b8386b0ac0fd090a5d3dedefa189edaf1851062982e0cd2e3f17b, 10
+ Expect   : event  CheckpointAnchored
+ Then     : latestCheckpoint (blue) -> seq 10
+ Repeat the same call -> RED ERROR  CheckpointNotNewer
+ SAY      : "The audit-log head is pinned on-chain and can only move
+             forward - the log can be extended but never rolled back."
+
+
+---------------------------------------------------------------------
+ 12. REVOKE  (do this LAST - it changes verdicts)     (as Account A)
+---------------------------------------------------------------------
+ Function : revokeFile
+ Input    : 0x717a211f6474880466723e790bf9d22b06a9f0ac9549f65ec40e0109ec286701, 0x203d34d45e9c02239fef86ef957a68bf0b5ec0fa61c491ab43142e1daf973741
+ Expect   : event  FileRevoked
+ Then     : verifyFile (genuine root) -> uint8: 3  (Revoked)
+ Repeat revokeFile -> RED ERROR  AlreadyRevoked
+ SAY      : "Revoked, not deleted: the blockchain never forgets."
+
+
+---------------------------------------------------------------------
+ 13. HOW TO SHOW THE LOGS
+---------------------------------------------------------------------
+ - The TERMINAL at the bottom of Remix has one line per transaction.
+ - Click the arrow (v) on a line to expand it. Point at:
+     status               0x1 Transaction mined and execution succeed
+     transaction hash     the unique id of the transaction
+     block number         the block it was written in
+     from / to            the wallet and the contract address
+     logs                 the decoded EVENT with its arguments
+                          (FileAnchored, IntegrityReported, TamperAlarm...)
+ - Blue buttons show their result directly under the button.
+ - Red errors (custom errors) show the contract enforcing its own rules.
+ - Optional: the DEBUG button steps through the execution.
+ - Take a screenshot of each step as a backup.
+
+
+---------------------------------------------------------------------
+ 14. SHOW THE AUTOMATED TEST OUTPUT  (second proof)
+---------------------------------------------------------------------
+ In a terminal:
+     cd ~/Karthik/vajra/blockchain && npx hardhat test
+ Result: 33 passing - the same behaviours, checked automatically.
+
+
+---------------------------------------------------------------------
+ 15. ONE-PARAGRAPH SUMMARY TO SAY AT THE END
+---------------------------------------------------------------------
+ "I demonstrated the smart contract in Remix to show each rule on its
+  own: write-once anchoring, Merkle proofs, role-based access, an oracle
+  that brings off-chain data on-chain, tamper alarms, and an append-only
+  ledger checkpoint. The full Vajra application uses this same contract.
+  The backend anchors every upload automatically, and an oracle node does
+  what Account B does here. Only fingerprints go on-chain - never files,
+  keys or identities."
+
+
+---------------------------------------------------------------------
+ TIPS
+---------------------------------------------------------------------
+ - Follow the order. Revoke (step 12) goes last.
+ - If you redeploy, request ids start again at 1 and the anchor is gone.
+ - If a call is rejected for a wrong account, check the ACCOUNT dropdown.
+ - bytes32 values must start with 0x and have exactly 64 hex characters.
+ - For arrays use square brackets and quotes, as in step 6.
+=====================================================================

@@ -32,6 +32,12 @@ from auth_service import (
 )
 from email_verification import send_verification_email, verify_user_code
 
+# Blockchain layer: Merkle commitments + on-chain anchoring (see BLOCKCHAIN.md)
+import ledger as merkle_ledger
+from chain_service import chain
+from chain_routes import build_router, blockchain_check, build_manifest
+import chain_bootstrap
+
 
 # Constants
 CHUNK_SIZE = 512 * 1024  # 512KB chunks
@@ -704,6 +710,16 @@ async def verify_file_integrity(
         "signed_by": signed_by,
         "checks": []
     }
+
+    # Check 0: on-chain anchor. Runs first because it is the one check a
+    # database-level attacker cannot satisfy by recomputing hashes.
+    chain_check = await blockchain_check(file_id, metadata)
+    result['checks'].append(chain_check)
+    result['blockchain'] = {k: v for k, v in chain_check.items() if k not in ('type', 'message')}
+    if chain_check['status'] == 'FAIL':
+        result['integrity_status'] = "COMPROMISED"
+        result['safe_to_download'] = False
+        return result
     
     try:
         # Check 1: File manifest signature
@@ -957,6 +973,23 @@ async def upload_file(
         }
         
         await save_file_metadata(metadata)
+
+        # Step 6b: Anchor the Merkle root of all chunk hashes on-chain.
+        # Only a 32-byte commitment leaves the server. Failure is non-fatal:
+        # the file is still stored and is later reported as "not anchored".
+        blockchain_anchor = {"anchored": False}
+        try:
+            anchor_tx = await chain.anchor_file(
+                file_id,
+                merkle_ledger.merkle_root(chunk_hashes),
+                merkle_ledger.manifest_hash(build_manifest(metadata)),
+                chunk_index,
+            )
+            blockchain_anchor = {"anchored": True, **anchor_tx}
+            print(f"⛓️  Anchored {file_id} in block {anchor_tx['block_number']}")
+        except Exception as chain_err:
+            blockchain_anchor = {"anchored": False, "reason": str(chain_err)}
+            print(f"⚠️  Blockchain anchoring skipped: {chain_err}")
         
         # Step 7: Log Audit Event (Success) (ABAC Requirement)
         await log_audit_event({
@@ -968,6 +1001,7 @@ async def upload_file(
                 "filename": file.filename,
                 "classification": classification,
                 "chunks": chunk_index,
+                "anchor_tx": blockchain_anchor.get("tx_hash"),
                 "ip": "127.0.0.1" # In prod, extract from Request
             }
         })
@@ -982,6 +1016,7 @@ async def upload_file(
                 "total_chunks": chunk_index,
                 "encryption_key": encryption_key.hex(),
                 "encryption_iv": iv.hex(),
+                "blockchain_anchor": blockchain_anchor,
                 "message": "File uploaded and encrypted successfully. Store the encryption_key securely!"
             }
         )
@@ -2291,3 +2326,18 @@ async def get_admin_logs(
             detail=f"Failed to fetch logs: {str(e)}"
         )
 
+
+# ── Blockchain layer routes ──────────────────────────────────────────────
+# Mounted last so `extract_claims_from_token` resolves to the final definition.
+app.include_router(build_router(extract_claims_from_token))
+
+
+@app.on_event("startup")
+async def _start_blockchain() -> None:
+    """Start the local chain, deploy the contract and replay prior anchors."""
+    asyncio.create_task(chain_bootstrap.run())   # don't hold up the API
+
+
+@app.on_event("shutdown")
+async def _stop_blockchain() -> None:
+    chain_bootstrap.stop()

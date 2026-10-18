@@ -2,7 +2,8 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import {
     BookOpen, Shield, Lock, Key, Upload, Download,
-    Database, Server, Zap, FileText, CheckCircle, ArrowRight
+    Database, Server, Zap, FileText, CheckCircle, ArrowRight,
+    Link2, Anchor, Hash, Eye, AlertTriangle
 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Footer } from '../../components/Footer';
@@ -53,6 +54,18 @@ export const DocsPage = () => {
                             <CheckCircle size={20} className="text-green-600 flex-shrink-0 mt-0.5" />
                             <span><strong>Email-Based MFA:</strong> Two-factor authentication for all users</span>
                         </div>
+                        <div className="flex items-start gap-2">
+                            <CheckCircle size={20} className="text-green-600 flex-shrink-0 mt-0.5" />
+                            <span><strong>Blockchain Anchoring:</strong> A Merkle root of every file's chunk hashes is written to a Solidity smart contract, so database tampering is detectable</span>
+                        </div>
+                        <div className="flex items-start gap-2">
+                            <CheckCircle size={20} className="text-green-600 flex-shrink-0 mt-0.5" />
+                            <span><strong>Hash-Chained Audit Ledger:</strong> Every log entry commits to the previous one; the head is pinned on-chain</span>
+                        </div>
+                        <div className="flex items-start gap-2">
+                            <CheckCircle size={20} className="text-green-600 flex-shrink-0 mt-0.5" />
+                            <span><strong>Oracle Monitoring:</strong> An independent wallet inspects real storage and raises an on-chain TamperAlarm</span>
+                        </div>
                     </div>
                 </Card>
 
@@ -90,6 +103,16 @@ export const DocsPage = () => {
                                 <li>🔐 <strong>Secure PostgreSQL database</strong> for metadata</li>
                                 <li>🔐 <strong>Row-level security</strong> policies</li>
                                 <li>🔐 <strong>Encrypted storage</strong> for all data at rest</li>
+                            </ul>
+                        </div>
+                        <div className="bg-white border-4 border-black p-4">
+                            <h3 className="font-bold mb-2">Blockchain Layer (Solidity + Hardhat + web3.py)</h3>
+                            <p className="text-sm mb-2">Tamper-evidence the database owner cannot edit</p>
+                            <ul className="text-sm space-y-1 ml-4">
+                                <li>⛓️ <strong>VajraRegistry.sol</strong> - smart contract on an EVM chain</li>
+                                <li>⛓️ <strong>Backend bridge</strong> - anchors roots, reads verdicts via web3.py</li>
+                                <li>⛓️ <strong>Oracle node</strong> - separate wallet reporting what storage really holds</li>
+                                <li>⛓️ <strong>Auto-start</strong> - backend launches the node, deploys, and replays its journal</li>
                             </ul>
                         </div>
                     </div>
@@ -138,7 +161,8 @@ export const DocsPage = () => {
                                 Select classification (Public/Mission Logs/Top Secret) →
                                 Choose file → Optionally provide vault password for signing →
                                 File split into 1MB chunks → Each chunk encrypted with AES-256-GCM →
-                                Optional: File hash signed with private key → Chunks stored in database
+                                Optional: File hash signed with private key → Chunks stored in database →
+                                Merkle root of all chunk hashes anchored on the blockchain
                             </p>
                         </div>
 
@@ -161,7 +185,8 @@ export const DocsPage = () => {
                                 <h3 className="font-black text-xl">INTEGRITY CHECK</h3>
                             </div>
                             <p className="font-mono text-sm">
-                                Click "CHECK" button → Backend verifies chunk integrity and signature →
+                                Click "CHECK" button → Backend compares the database against the on-chain
+                                Merkle root, then verifies chunk integrity and signature →
                                 Shows detailed results (chunk status, signature verification) →
                                 Indicates if file is safe to download
                             </p>
@@ -184,6 +209,46 @@ export const DocsPage = () => {
                                     Same process with entered password
                                 </div>
                             </div>
+                        </div>
+
+                        {/* Step 7 */}
+                        <div className="bg-white text-black border-4 border-black p-4">
+                            <div className="flex items-center gap-2 mb-2">
+                                <div className="bg-brutal-yellow px-3 py-1 border-2 border-black font-black">7</div>
+                                <h3 className="font-black text-xl">BLOCKCHAIN VERIFICATION</h3>
+                            </div>
+                            <p className="font-mono text-sm">
+                                Open "CHAIN" → See network status, contract address, latest block and anchored
+                                file count → In "CHECK", the BLOCKCHAIN ANCHOR block shows the block number,
+                                transaction hash and whether the on-chain root equals the database root
+                            </p>
+                        </div>
+
+                        {/* Step 8 */}
+                        <div className="bg-white text-black border-4 border-black p-4">
+                            <div className="flex items-center gap-2 mb-2">
+                                <div className="bg-brutal-yellow px-3 py-1 border-2 border-black font-black">8</div>
+                                <h3 className="font-black text-xl">ORACLE TAMPER ALARM</h3>
+                            </div>
+                            <p className="font-mono text-sm">
+                                Every 60 seconds (or on "RUN ORACLE CHECK") the contract requests a check →
+                                Oracle reads the real stored chunks and recomputes the root → Reports it from a
+                                separate wallet → Contract compares with the anchor → Mismatch raises a
+                                permanent TamperAlarm event
+                            </p>
+                        </div>
+
+                        {/* Step 9 */}
+                        <div className="bg-white text-black border-4 border-black p-4">
+                            <div className="flex items-center gap-2 mb-2">
+                                <div className="bg-brutal-yellow px-3 py-1 border-2 border-black font-black">9</div>
+                                <h3 className="font-black text-xl">AUDIT LEDGER (ADMIN)</h3>
+                            </div>
+                            <p className="font-mono text-sm">
+                                "CHAIN" → "VERIFY LEDGER" walks the hash chain and names the first broken entry →
+                                "ANCHOR HEAD ON-CHAIN" pins the latest hash in the contract so even a full
+                                rewrite of the log is detected
+                            </p>
                         </div>
                     </div>
                 </Card>
@@ -229,6 +294,24 @@ export const DocsPage = () => {
                                 <li>🔐 <strong>Integrity checks</strong> - Tamper detection</li>
                                 <li>🔐 <strong>Classification levels</strong> - Data separation</li>
                                 <li>🔐 <strong>Forensic verification</strong> - Signature validation</li>
+                            </ul>
+                        </div>
+                        <div className="bg-white text-black border-4 border-black p-4">
+                            <h3 className="font-black mb-2">Blockchain Layer</h3>
+                            <ul className="font-mono text-sm space-y-1">
+                                <li>⛓️ <strong>Solidity contract</strong> - On-chain commitments</li>
+                                <li>⛓️ <strong>Merkle tree</strong> - One root per file</li>
+                                <li>⛓️ <strong>Hash chain</strong> - Tamper-evident audit log</li>
+                                <li>⛓️ <strong>web3.py</strong> - Backend ↔ chain bridge</li>
+                            </ul>
+                        </div>
+                        <div className="bg-white text-black border-4 border-black p-4">
+                            <h3 className="font-black mb-2">Oracle & Monitoring</h3>
+                            <ul className="font-mono text-sm space-y-1">
+                                <li>🔮 <strong>Request / callback</strong> - Off-chain to on-chain</li>
+                                <li>🔮 <strong>Separate wallet</strong> - Reports, never decides</li>
+                                <li>🔮 <strong>TamperAlarm</strong> - Permanent on-chain event</li>
+                                <li>🔮 <strong>Fail-silent</strong> - No false alarms if data unreachable</li>
                             </ul>
                         </div>
                     </div>
@@ -281,7 +364,227 @@ export const DocsPage = () => {
                                 chunk data (1MB per chunk).
                             </p>
                         </div>
+                        <div className="border-4 border-black p-4 bg-brutal-bg">
+                            <h3 className="font-black mb-2 flex items-center gap-2">
+                                <Anchor size={20} />
+                                On-Chain Anchoring
+                            </h3>
+                            <p className="font-mono text-sm">
+                                Each upload writes the file's Merkle root and manifest hash to the smart
+                                contract. Anchors are write-once and can be revoked but never erased.
+                            </p>
+                        </div>
+                        <div className="border-4 border-black p-4 bg-brutal-bg">
+                            <h3 className="font-black mb-2 flex items-center gap-2">
+                                <AlertTriangle size={20} />
+                                Automatic Tamper Alarms
+                            </h3>
+                            <p className="font-mono text-sm">
+                                The oracle re-checks every anchored file on a schedule. A mismatch raises
+                                a TamperAlarm event and the contract itself marks the file Compromised.
+                            </p>
+                        </div>
+                        <div className="border-4 border-black p-4 bg-brutal-bg">
+                            <h3 className="font-black mb-2 flex items-center gap-2">
+                                <Hash size={20} />
+                                Hash-Chained Audit Ledger
+                            </h3>
+                            <p className="font-mono text-sm">
+                                Login, upload, download and log-view events are sealed into a hash chain.
+                                Editing or deleting any entry breaks every hash after it.
+                            </p>
+                        </div>
+                        <div className="border-4 border-black p-4 bg-brutal-bg">
+                            <h3 className="font-black mb-2 flex items-center gap-2">
+                                <Link2 size={20} />
+                                Self-Starting, Self-Healing Chain
+                            </h3>
+                            <p className="font-mono text-sm">
+                                Starting the backend launches the local node, deploys the contract (or
+                                redeploys a stale one) and replays a hash-chained journal of earlier anchors.
+                            </p>
+                        </div>
                     </div>
+                </Card>
+
+                {/* Blockchain Concepts */}
+                <Card className="bg-brutal-purple text-white border-8 border-black p-8 mb-8">
+                    <h2 className="text-3xl font-black mb-2 flex items-center gap-3">
+                        <Link2 size={32} />
+                        BLOCKCHAIN
+                    </h2>
+                    <p className="font-mono text-sm mb-4">Each concept below is implemented in this project, not just described.</p>
+                    <div className="grid md:grid-cols-2 gap-4">
+                        {[
+                            ['Cryptographic hashing', 'SHA-256 fingerprints; changing one bit changes the whole hash.'],
+                            ['Merkle tree & proof', 'Chunk hashes combine pairwise into one root; any single chunk can be proven with a few hashes.'],
+                            ['Commitment scheme', 'Only the hash goes on-chain, so integrity is provable without revealing data.'],
+                            ['Smart contract', 'VajraRegistry.sol enforces its own rules: roles, write-once anchors, monotonic checkpoints.'],
+                            ['Immutability', 'Recorded commitments cannot be rewritten; revocation flags instead of deleting.'],
+                            ['Hash chain', 'Each audit entry includes the previous hash, so history cannot be edited unnoticed.'],
+                            ['Events', 'Cheap, permanent, searchable logs such as FileAnchored and TamperAlarm.'],
+                            ['Access control', 'Owner, anchorer and oracle roles enforced by contract modifiers.'],
+                            ['Oracle', 'Brings off-chain facts on-chain through a permissioned request/callback.'],
+                            ['Transactions & gas', 'Every write is a mined transaction; roots are anchored instead of every event to save gas.'],
+                            ['State replay', 'Chain state is rebuilt from history after a restart, as real nodes do.'],
+                            ['Privacy by hashing', 'File ids are hashed before reaching the chain; no names, classes or identities.'],
+                        ].map(([title, text]) => (
+                            <div key={title} className="bg-white text-black border-4 border-black p-4">
+                                <h3 className="font-black mb-1">{title}</h3>
+                                <p className="font-mono text-sm">{text}</p>
+                            </div>
+                        ))}
+                    </div>
+                </Card>
+
+                {/* On-chain vs off-chain */}
+                <Card className="bg-white border-8 border-black p-8 mb-8">
+                    <h2 className="text-3xl font-black mb-4 flex items-center gap-3">
+                        <Eye size={32} />
+                        WHAT IS ON-CHAIN, AND WHAT IS NOT
+                    </h2>
+                    <div className="grid md:grid-cols-2 gap-4 font-mono text-sm">
+                        <div className="border-4 border-black bg-green-50 p-4">
+                            <div className="font-bold mb-2">ON-CHAIN (public, permanent)</div>
+                            <ul className="list-disc ml-5 space-y-1">
+                                <li>Merkle root of each file's encrypted chunk hashes</li>
+                                <li>Hash of the signed file manifest</li>
+                                <li>SHA-256 of the file id (never the id itself)</li>
+                                <li>Audit-ledger head checkpoints</li>
+                                <li>Oracle requests, reports and alarms</li>
+                            </ul>
+                        </div>
+                        <div className="border-4 border-black bg-red-50 p-4">
+                            <div className="font-bold mb-2">NEVER ON-CHAIN</div>
+                            <ul className="list-disc ml-5 space-y-1">
+                                <li>File contents or encryption keys</li>
+                                <li>Filenames and classification levels</li>
+                                <li>User identities or emails</li>
+                                <li>Private signing keys</li>
+                            </ul>
+                        </div>
+                    </div>
+                </Card>
+
+                {/* Oracle */}
+                <Card className="bg-brutal-orange text-white border-8 border-black p-8 mb-8">
+                    <h2 className="text-3xl font-black mb-2 flex items-center gap-3">
+                        <AlertTriangle size={32} />
+                        HOW THE ORACLE WORKS
+                    </h2>
+                    <p className="font-mono text-sm mb-4">
+                        A contract cannot read a database or a disk. The oracle is the trusted messenger that
+                        carries what it saw back on-chain.
+                    </p>
+                    <div className="space-y-3">
+                        {[
+                            ['1', 'REQUEST', 'The contract emits IntegrityCheckRequested(requestId, fileId).'],
+                            ['2', 'OBSERVE', 'The oracle node downloads every stored chunk, reads the database row and recomputes the Merkle root.'],
+                            ['3', 'CALLBACK', 'It calls fulfillIntegrityCheck(requestId, root) from a separate wallet; only that wallet is allowed to.'],
+                            ['4', 'JUDGE', 'The contract compares the root with the anchor, stores Healthy or Compromised and emits TamperAlarm on a mismatch.'],
+                        ].map(([n, title, text]) => (
+                            <div key={n} className="bg-white text-black border-4 border-black p-4">
+                                <div className="flex items-center gap-2 mb-1">
+                                    <div className="bg-brutal-yellow px-3 py-1 border-2 border-black font-black">{n}</div>
+                                    <h3 className="font-black text-lg">{title}</h3>
+                                </div>
+                                <p className="font-mono text-sm">{text}</p>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="bg-white text-black border-4 border-black p-4 mt-4 font-mono text-sm">
+                        <strong>Design choices:</strong> the oracle reports but never decides; it uses a different
+                        wallet from the anchorer so no single key can both write and vouch for a commitment; and if
+                        storage is unreachable it stays silent and retries, because "could not look" is not
+                        "found tampering".
+                    </div>
+                </Card>
+
+                {/* Smart contract reference */}
+                <Card className="bg-white border-8 border-black p-8 mb-8">
+                    <h2 className="text-3xl font-black mb-4 flex items-center gap-3">
+                        <Anchor size={32} />
+                        SMART CONTRACT REFERENCE
+                    </h2>
+                    <div className="overflow-x-auto border-4 border-black">
+                        <table className="w-full font-mono text-xs">
+                            <thead className="bg-black text-white">
+                                <tr>
+                                    <th className="p-2 text-left">FUNCTION</th>
+                                    <th className="p-2 text-left">WHO</th>
+                                    <th className="p-2 text-left">WHAT IT DOES</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {[
+                                    ['anchorFile(fileId, root, manifest, chunks)', 'anchorer', 'Records a file commitment. Write-once: a second call reverts.'],
+                                    ['revokeFile(fileId, reason)', 'anchorer', 'Flags a file as revoked; the anchor itself is never deleted.'],
+                                    ['anchorCheckpoint(head, seq)', 'anchorer', 'Pins the audit-ledger head. seq must strictly increase.'],
+                                    ['verifyFile(fileId, root)', 'anyone', 'Returns NotAnchored, Match, Mismatch, Revoked or Compromised.'],
+                                    ['verifyChunk(fileId, hash, index, proof)', 'anyone', 'Verifies one chunk with a Merkle proof, on-chain.'],
+                                    ['requestIntegrityCheck(fileId)', 'anchorer', 'Asks the oracle to check a file; emits IntegrityCheckRequested.'],
+                                    ['fulfillIntegrityCheck(id, root)', 'oracle', 'Oracle callback; the contract judges and may emit TamperAlarm.'],
+                                    ['getIntegrityReport(fileId)', 'anyone', 'Latest oracle verdict, wallet, block and number of checks.'],
+                                    ['setAnchorer / setOracle', 'owner', 'Manages who may write anchors and who may report.'],
+                                    ['transferOwnership(newOwner)', 'owner', 'Hands the owner role to another account.'],
+                                ].map(([fn, who, what]) => (
+                                    <tr key={fn} className="border-t-2 border-black align-top">
+                                        <td className="p-2 font-bold">{fn}</td>
+                                        <td className="p-2">{who}</td>
+                                        <td className="p-2">{what}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                    <p className="font-mono text-xs mt-3">
+                        Events: FileAnchored, FileRevoked, CheckpointAnchored, IntegrityCheckRequested,
+                        IntegrityReported, TamperAlarm, AnchorerSet, OracleSet, OwnershipTransferred.
+                        Merkle leaf = sha256(0x00 ‖ index ‖ chunkHash); node = sha256(0x01 ‖ min ‖ max).
+                    </p>
+                </Card>
+
+                {/* Blockchain API */}
+                <Card className="bg-brutal-bg border-8 border-black p-8 mb-8">
+                    <h2 className="text-3xl font-black mb-4 flex items-center gap-3">
+                        <Server size={32} />
+                        BLOCKCHAIN API
+                    </h2>
+                    <div className="space-y-2 font-mono text-sm">
+                        {[
+                            ['GET', '/chain/status', 'Network, contract, block height, bootstrap state'],
+                            ['GET', '/chain/files/{id}/anchor', 'On-chain vs database comparison for one file'],
+                            ['POST', '/chain/files/{id}/anchor', 'Admin: anchor a file uploaded before the chain existed'],
+                            ['GET', '/chain/files/{id}/proof/{index}', 'Merkle proof for a single chunk, checked locally and on-chain'],
+                            ['POST', '/chain/files/{id}/oracle-check', 'Request an oracle check and wait for the answer'],
+                            ['GET', '/chain/oracle/status', 'Oracle wallet, stats and recent events'],
+                            ['POST', '/admin/oracle/sweep', 'Admin: ask the oracle to re-check every file'],
+                            ['GET', '/admin/ledger/verify', 'Admin: verify the hash chain and compare with the on-chain head'],
+                            ['GET', '/admin/ledger/entries', 'Admin: recent ledger entries'],
+                            ['POST', '/admin/ledger/checkpoint', 'Admin: pin the current ledger head on-chain'],
+                        ].map(([method, path, text]) => (
+                            <div key={method + path} className="bg-white border-4 border-black p-3 flex flex-wrap items-center gap-3">
+                                <span className={`px-2 py-1 border-2 border-black font-black text-xs ${method === 'GET' ? 'bg-brutal-green' : 'bg-brutal-yellow'}`}>{method}</span>
+                                <code className="font-bold">{path}</code>
+                                <span className="text-xs">— {text}</span>
+                            </div>
+                        ))}
+                    </div>
+                </Card>
+
+                {/* Known limitations */}
+                <Card className="bg-brutal-yellow border-8 border-black p-8 mb-8">
+                    <h2 className="text-3xl font-black mb-4 flex items-center gap-3 text-black">
+                        <AlertTriangle size={32} />
+                        KNOWN LIMITATIONS
+                    </h2>
+                    <ul className="font-mono text-sm text-black space-y-2 list-disc ml-5">
+                        <li><strong>Local development chain.</strong> It lives in memory; state is rebuilt from the journal on each start. The same contract deploys unchanged to a public testnet.</li>
+                        <li><strong>Single oracle.</strong> The observation is only as honest as the oracle (the "oracle problem"). Production systems use several oracles and require a quorum.</li>
+                        <li><strong>Earlier files.</strong> Files uploaded before the blockchain layer show "not anchored" until an admin anchors them.</li>
+                        <li><strong>Journal trust.</strong> Replay trusts the local journal. It is hash-chained so edits are detected, and replay stops at the first bad entry.</li>
+                        <li><strong>Fail-open anchoring.</strong> If the chain is unreachable an upload still succeeds and is reported as not anchored, never silently verified.</li>
+                    </ul>
                 </Card>
 
                 {/* Security Notice */}
@@ -306,6 +609,14 @@ export const DocsPage = () => {
                         <p>
                             <strong>✓ ISOLATED:</strong> Each user's private key encrypted with
                             their unique vault password.
+                        </p>
+                        <p>
+                            <strong>✓ ANCHORED:</strong> File fingerprints live on a blockchain the
+                            database owner cannot edit; only hashes are published, never data.
+                        </p>
+                        <p>
+                            <strong>✓ MONITORED:</strong> An independent oracle re-checks stored files and
+                            raises a permanent on-chain alarm on any mismatch.
                         </p>
                     </div>
                 </Card>
